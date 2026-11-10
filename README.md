@@ -52,6 +52,7 @@ python3 -m http.server 8000
 | `js/day/world.js` | 장면 렌더러, 카메라 맞추기, 시간에 따른 조명(`setTime`), 활동 순환(`Routine`) |
 | `js/day/sky.js` | 해 위치 계산, 하늘 상태, 창밖 풍경 그리기 |
 | `js/day/office.js`, `subway.js`, `home.js`, `kit.js` | 회사·지하철·집 장면과 공용 소품 |
+| `manifest.json`, `sw.js`, `icons/` | 앱 설치 정보, 오프라인용 서비스 워커, 앱 아이콘 (`tools/icon.html`로 PNG 생성) |
 | `dev/sets.html` | 장면 하나만 띄워 보는 개발 페이지 |
 | `js/tuning.js` | 캐릭터 비율과 장면 카메라 값 (스튜디오가 저장) |
 | `dev/studio.html`, `dev/studio.js`, `tools/studio.mjs` | 스튜디오 화면과 저장용 로컬 서버 |
@@ -59,6 +60,17 @@ python3 -m http.server 8000
 | `dev/gallery.html`, `dev/stage.html` | 파츠 확인용 개발 페이지 |
 | `dev/poses.html` | 애니메이션의 특정 순간을 나란히 찍어 보는 개발 페이지 (`?anim=wave&times=0.5,0.8&rot=0,0.9`) |
 | `tools/shot.mjs` | 헤드리스 Chrome 스크린샷 도구 (`node tools/shot.mjs "dev/gallery.html?cat=hair" out.png`) |
+
+## 폰에 앱처럼 설치하기
+
+`manifest.json`(이름·아이콘·세로 전체 화면)과 `sw.js`(한 번 열면 인터넷 없이도 열리게 해 주는 서비스 워커)가 들어 있습니다. 설치하면 홈 화면에 도토리 아이콘이 생기고 `day.html`이 주소창 없이 열립니다.
+
+- **iPhone (Safari)**: 페이지를 열고 공유 버튼 → **홈 화면에 추가**
+- **Android (Chrome)**: 메뉴(⋮) → **앱 설치** 또는 **홈 화면에 추가**
+
+오프라인 동작과 정식 설치는 브라우저 규칙상 **https** 주소(또는 같은 컴퓨터의 localhost)에서만 됩니다. 같은 와이파이의 `http://<맥 IP>:8000`으로 열면 홈 화면에 추가는 되지만, 열 때마다 맥의 서버가 켜져 있어야 하고 인터넷 없이는 열리지 않습니다. 언제 어디서나 쓰려면 GitHub Pages 같은 https 정적 호스팅에 올리면 됩니다. 기록과 캐릭터는 주소(사이트)마다 따로 저장되므로, 주소를 옮기면 공방의 공유 링크로 캐릭터를 다시 옮겨 주세요.
+
+파일을 바꾼 뒤에는 따로 할 일이 없습니다(네트워크를 먼저 쓰고, 안 될 때만 저장본을 씁니다). `sw.js`의 미리 받을 파일 목록을 바꿨다면 `CACHE` 이름의 숫자를 올려 주세요. 아이콘은 `icons/icon.svg`를 고친 뒤 `node tools/shot.mjs tools/icon.html icons/icon-512.png --w 512 --h 512 --dpr 1`(192, 180도 같은 방법)로 다시 만듭니다.
 
 ## 스튜디오 (비율·카메라 조정) — `dev/studio.html`
 

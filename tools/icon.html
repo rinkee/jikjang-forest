@@ -1,0 +1,8 @@
+<!doctype html><html><head><meta charset="utf-8"><title>LOADING</title>
+<style>html,body{margin:0;height:100%;background:transparent}img{display:block;width:100vw;height:100vh}</style></head>
+<body><img src="../icons/icon.svg" alt="">
+<script>
+/* Renders icons/icon.svg full window, for making the PNG sizes:
+ *   node tools/shot.mjs tools/icon.html icons/icon-512.png --w 512 --h 512 --dpr 1   (also 192, 180) */
+document.querySelector('img').onload = () => (document.title = 'READY');
+</script></body></html>

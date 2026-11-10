@@ -7,6 +7,10 @@
 <meta name="description" content="직장의 숲 · 캐릭터 공방 — 나만의 귀여운 3D 직장인 캐릭터를 꾸미고 사원증을 발급받아 보세요.">
 <meta name="theme-color" content="#fbf5e6">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Cellipse cx='32' cy='40' rx='19' ry='21' fill='%23e8975a'/%3E%3Cpath d='M10 30C10 14 22 6 32 6s22 8 22 24c-7 4-15 4-22 1-7 3-15 3-22-1z' fill='%238a5630'/%3E%3Cpath d='M32 7c0-4 2-6 6-6' stroke='%236c3f20' stroke-width='4' fill='none' stroke-linecap='round'/%3E%3C/svg%3E">
+<link rel="manifest" href="manifest.json">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="직장의 숲">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Jua&display=swap">
@@ -277,5 +281,11 @@
   }
 </script>
 <script type="module" src="js/app.js"></script>
+<script>
+  /* installable app: keep working offline after one visit (needs https or localhost) */
+  if ('serviceWorker' in navigator && window.isSecureContext) {
+    addEventListener('load', function () { navigator.serviceWorker.register('sw.js').catch(function () {}); });
+  }
+</script>
 </body>
 </html>

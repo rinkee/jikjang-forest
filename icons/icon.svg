@@ -1,0 +1,37 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <!-- 직장의 숲 app icon: an acorn with a leaf on a forest-green tile.
+       Everything sits inside the central 80% circle, so it also works as a maskable icon. -->
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#93d49e"/>
+      <stop offset="1" stop-color="#4fa862"/>
+    </linearGradient>
+    <radialGradient id="nut" cx="0.36" cy="0.32" r="0.8">
+      <stop offset="0" stop-color="#ffcf98"/>
+      <stop offset="0.55" stop-color="#f2a35e"/>
+      <stop offset="1" stop-color="#d9773a"/>
+    </radialGradient>
+    <linearGradient id="cap" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ad7343"/>
+      <stop offset="1" stop-color="#7a4a26"/>
+    </linearGradient>
+    <pattern id="scales" width="22" height="16" patternUnits="userSpaceOnUse">
+      <path d="M0 16 Q11 4 22 16" fill="none" stroke="#c99062" stroke-width="3" stroke-linecap="round" opacity=".55"/>
+    </pattern>
+  </defs>
+  <rect width="512" height="512" fill="url(#bg)"/>
+  <circle cx="256" cy="256" r="196" fill="#fffaf0" opacity=".16"/>
+  <ellipse cx="256" cy="424" rx="112" ry="16" fill="#2f6e3c" opacity=".28"/>
+  <!-- nut -->
+  <path d="M256 418 C 186 418 150 352 156 286 C 160 240 200 226 256 226 C 312 226 352 240 356 286 C 362 352 326 418 256 418 Z" fill="url(#nut)"/>
+  <circle cx="256" cy="420" r="9" fill="#d9773a"/>
+  <ellipse cx="210" cy="312" rx="17" ry="38" fill="#ffffff" opacity=".35" transform="rotate(18 210 312)"/>
+  <!-- cap -->
+  <path d="M136 262 C 132 182 188 136 256 136 C 324 136 380 182 376 262 C 330 286 182 286 136 262 Z" fill="url(#cap)"/>
+  <path d="M136 262 C 132 182 188 136 256 136 C 324 136 380 182 376 262 C 330 286 182 286 136 262 Z" fill="url(#scales)"/>
+  <path d="M142 258 C 190 276 322 276 370 258" fill="none" stroke="#6b3f1f" stroke-width="7" stroke-linecap="round" opacity=".5"/>
+  <!-- stem and leaf -->
+  <path d="M252 140 C 250 118 256 102 270 92" fill="none" stroke="#6b3f1f" stroke-width="14" stroke-linecap="round"/>
+  <path d="M272 104 C 300 70 352 66 380 84 C 360 118 312 130 272 104 Z" fill="#c2ea9f"/>
+  <path d="M278 102 C 310 94 340 88 370 86" fill="none" stroke="#7cbd6e" stroke-width="5" stroke-linecap="round"/>
+</svg>
