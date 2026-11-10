@@ -11,6 +11,9 @@
  *                      storage ('ccws-day-test') so real records are never touched.
  *   ?fresh=1           (fake clock only) start from empty test data, already set up
  *   ?in=ISO            (fake clock only) a work session that started at ISO
+ *   ?home=ISO          (fake clock only) came home at ISO (the 6-hour rest starts then)
+ *   ?sleep=tired|late  (with ?home) went straight to bed on coming home
+ *   ?hp=N              (fake clock only) stamina at the start of ?in, or on arrival at ?home
  *   ?onboard=1         (fake clock only) show the first-run setup
  *   ?ride=ms           cutscene length (default 5600)
  *   ?mute=1            no sound for this visit
@@ -63,9 +66,18 @@ const store = {
 
 let data = C.normalize(FAKE && Q.get('fresh') === '1' ? null : store.get(KEY));
 if (FAKE && Q.get('fresh') === '1') data.configured = Q.get('onboard') !== '1';
+const HP = FAKE && Q.has('hp') ? Math.max(0, Math.min(C.STAMINA.max, +Q.get('hp') || 0)) : null;
 if (FAKE && Q.has('in')) {
   const t = new Date(Q.get('in')).getTime();
-  if (Number.isFinite(t)) data.session = { in: t };
+  if (Number.isFinite(t)) data.session = { in: t, s0: HP ?? C.STAMINA.max };
+}
+if (FAKE && Q.has('home')) {
+  const t = new Date(Q.get('home')).getTime();
+  const sleep = ['tired', 'late'].includes(Q.get('sleep')) ? Q.get('sleep') : null;
+  if (Number.isFinite(t)) {
+    data.session = null;
+    data.home = { from: t, s0: HP ?? 50, sleepUntil: sleep ? t + C.REST_HOURS * 3600e3 : 0, sleep };
+  }
 }
 const save = () => store.set(KEY, data);
 
@@ -83,6 +95,11 @@ const el = {
   gauge: $('#gauge'),
   gaugeFill: $('#gaugeFill'),
   gaugeLb: $('#gaugeLb'),
+  hp: $('#hp'),
+  hpBar: $('#hpBar'),
+  hpFill: $('#hpFill'),
+  hpLb: $('#hpLb'),
+  hpV: $('#hpV'),
   status: $('#status'),
   plus: $('#plus'),
   barNote: $('#barNote'),
@@ -104,6 +121,7 @@ let world = null;
 let look = null;
 let lastToday = null;
 let lastFrac = 0;
+let lastCardH = 0;
 
 function setMode(m) {
   mode = m;
@@ -188,7 +206,8 @@ function settingsForm(s) {
         <label class="field">퇴근 시간<input type="time" name="end" value="${esc(s.end.padStart(5, '0'))}" required></label>
       </div>
       <div class="field">일하는 요일<div class="days">${days}</div></div>
-      <p class="hint">일한 1분마다 도토리 1개! 퇴근 시간이 지나거나 쉬는 날에 일하면 1.5배예요.</p>
+      <p class="hint">일한 1분마다 도토리 1개! 퇴근 시간이 지나거나 쉬는 날에 일하면 1.5배예요. 대신 체력이 2배로 닳아요. 체력이 바닥나면 분신은 집에 가요.</p>
+      <p class="hint">⚡ 퇴근하면 집에서 ${C.REST_HOURS}시간은 쉬어야 다시 출근할 수 있어요.</p>
     </div>`;
 }
 function readSettings(root) {
@@ -251,13 +270,16 @@ function openClockOut() {
   const t = now();
   const p = C.progress(data.session.in, t, data.settings);
   const early = !p.overtime && C.isWorkday(data.session.in, data.settings);
+  const back = t + C.REST_HOURS * 3600e3;
   el.sheetWrap.dataset.dismiss = '';
   openSheet(
     `<h2 id="sheetTitle">${early ? '벌써 퇴근할까요? 🌤️' : '오늘도 수고했어요! 🌙'}</h2>
-     <p>${early ? `퇴근 시간(${esc(data.settings.end)})까지 ${esc(C.clockLeft(p.toEndMs))} 남았어요. 그래도 괜찮아요.` : '분신도 같이 짐을 챙기고 있어요.'}</p>
+     <p>${early ? `퇴근 시간(${esc(data.settings.end)})까지 ${esc(C.clockLeft(p.toEndMs))} 남았어요. 그래도 괜찮아요.` : '분신도 같이 짐을 챙기고 있어요.'}
+        퇴근하면 집에서 ${C.REST_HOURS}시간은 쉬어서, ${C.hm(back)}부터 다시 출근할 수 있어요.</p>
      <div class="facts">
        <span>출근</span><b>${C.hm(data.session.in)}</b>
        <span>근무</span><b>${C.dur(p.minutes)}</b>
+       <span>남은 체력</span><b>⚡ ${Math.ceil(C.staminaAt(data, t))}</b>
        <span>이번에 받은 도토리</span><b><i class="ac"></i> ${C.comma(p.acorns)}</b>
      </div>
      <div class="btns">
@@ -296,13 +318,16 @@ function openReceipt() {
          <dt>퇴근</dt><dd>${C.hm(r.out)}</dd>
          <dt>근무</dt><dd>${C.dur(r.minutes)}</dd>
          ${r.overtimeMin ? `<dt>그중 야근</dt><dd>${C.dur(r.overtimeMin)}</dd>` : ''}
+         ${Number.isFinite(r.stamina) ? `<dt>남은 체력</dt><dd>⚡ ${r.stamina}</dd>` : ''}
        </dl>
        <hr>
        <dl class="big"><dt>받은 도토리</dt><dd><i class="ac"></i> ${C.comma(r.acorns)}</dd></dl>
        <dl style="margin-top:6px"><dt>모은 도토리</dt><dd><i class="ac"></i> ${C.comma(r.bank)}</dd></dl>
        <hr>
        <p class="thanks">오늘도 수고했어요!</p>
-       ${r.auto ? `<p class="auto">퇴근 버튼을 안 눌러서 ${C.hm(r.out)}에 퇴근한 걸로 했어요.</p>` : ''}
+       ${r.tired ? `<p class="auto">체력이 다 떨어져서 ${C.hm(r.out)}에 집으로 돌아왔어요.</p>` : r.auto ? `<p class="auto">퇴근 버튼을 안 눌러서 ${C.hm(r.out)}에 퇴근한 걸로 했어요.</p>` : ''}
+       ${r.sleep ? `<p class="auto">${r.tired ? '너무 지쳐서' : '야근하고 와서'} 바로 잠들었어요 💤</p>` : ''}
+       ${r.restUntil > now() ? `<p class="auto">${C.hm(r.restUntil)}까지는 집에서 푹 쉬어요.</p>` : ''}
      </div>
      <div class="btns"><button type="button" class="btn" data-act="ok">집에서 쉬기 🏠</button></div>`,
     (root) => root.querySelector('[data-act=ok]').addEventListener('click', done)
@@ -311,11 +336,15 @@ function openReceipt() {
 }
 
 /* ============================================================== flow */
-async function ride(dir) {
+async function ride(dir, tired) {
   setMode('ride');
   const clockNow = C.hm(now());
   el.ledText.textContent =
-    dir === 'in' ? `${clockNow} · 이번 역은 직장의숲, 직장의숲 역입니다 · 내리실 문은 오른쪽입니다` : `${clockNow} · 이번 역은 우리집, 우리집 역입니다 · 오늘도 수고하셨습니다`;
+    dir === 'in'
+      ? `${clockNow} · 이번 역은 직장의숲, 직장의숲 역입니다 · 내리실 문은 오른쪽입니다`
+      : tired
+        ? `${clockNow} · 체력이 바닥나서 집으로 갑니다 · 이번 역은 우리집, 우리집 역입니다 · 푹 쉬세요`
+        : `${clockNow} · 이번 역은 우리집, 우리집 역입니다 · 오늘도 수고하셨습니다`;
   sfx.whoosh();
   await iris(false);
   world.show('subway', { dir, ride: 0 });
@@ -346,16 +375,17 @@ async function ride(dir) {
 }
 
 async function clockIn() {
-  if (busy || data.session) return;
+  if (busy || !C.canClockIn(data, now())) return;
   busy = true;
   sfx.unlock();
   sfx.pop();
   C.clockIn(data, now());
   save();
   await ride('in');
-  enter('office');
+  enter(data.session ? 'office' : 'home');
   await iris(true);
   busy = false;
+  if (!data.session) openReceipt();
 }
 
 async function clockOut() {
@@ -365,6 +395,24 @@ async function clockOut() {
   C.clockOut(data, now());
   save();
   await ride('out');
+  enter('home');
+  await iris(true);
+  busy = false;
+  openReceipt();
+}
+
+/** stamina ran out at work: the character goes home by itself */
+async function goHomeTired() {
+  busy = true;
+  el.sheetWrap.dataset.dismiss = '';
+  closeSheet();
+  if (data.receipt && now() - data.receipt.out < 60e3) {
+    // it just happened: ride home
+    await ride('out', true);
+  } else {
+    // it happened while nobody was looking: it is already home
+    await iris(false);
+  }
   enter('home');
   await iris(true);
   busy = false;
@@ -384,7 +432,13 @@ function onGo() {
   if (busy) return;
   sfx.unlock();
   if (data.session) openClockOut();
-  else clockIn();
+  else if (!C.canClockIn(data, now())) {
+    // still resting: say when it can go again
+    sfx.nope();
+    el.barNote.classList.remove('nudge');
+    void el.barNote.offsetWidth;
+    el.barNote.classList.add('nudge');
+  } else clockIn();
 }
 
 /* ============================================================== HUD */
@@ -399,23 +453,24 @@ function isLunch(t) {
 
 function tick(quiet) {
   const t = now();
-  // a session left running past its cap closes by itself
+  // out of stamina: the session closes by itself and the character goes home
   if (C.settle(data, t)) {
     save();
-    if (mode === 'office') {
-      world.show('home', world.ctx);
-      setMode('home');
-      openReceipt();
-    }
+    if (mode === 'office' && !busy) goHomeTired();
   }
   // the sky, the window views and the room light follow the real clock
   if (world) world.setTime(t);
   const ctx = world.ctx;
   ctx.now = now;
   ctx.todayAcorns = C.today(data, t);
-  ctx.spot = C.homeSpotAt(t);
+  ctx.spot = C.homeSpot(data, t);
+  ctx.sleepWhy = C.sleepReason(data, t);
+  ctx.stamina = C.staminaAt(data, t);
   ctx.lunch = isLunch(t);
-  ctx.overtime = !!data.session && C.progress(data.session.in, t, data.settings).overtime;
+  const p = data.session && C.progress(data.session.in, t, data.settings);
+  ctx.overtime = !!p && p.overtime;
+  // to-dos on the whiteboard get ticked off through the scheduled workday
+  ctx.todoDone = p ? Math.min(3, Math.floor((p.minutes / C.shiftMinutes(data.settings)) * 3 + 1e-9)) : 0;
   if (quiet === true) return;
   renderHud(t);
 }
@@ -437,12 +492,17 @@ function renderHud(t) {
       el.sideV.classList.remove('ot');
     }
     el.gauge.hidden = false;
-    const frac = p.capped ? 1 : p.frac;
+    const frac = p.frac;
     el.gaugeFill.classList.toggle('reset', frac < lastFrac);
     el.gaugeFill.style.width = `${(frac * 100).toFixed(1)}%`;
     lastFrac = frac;
-    el.gaugeLb.textContent = p.capped ? '오늘은 여기까지! 퇴근하세요' : p.overtime ? '1.5배 적립 중 🌙' : '다음 도토리까지';
-    el.barNote.textContent = `출근 ${C.hm(data.session.in)} · 근무 ${C.dur(p.minutes)}`;
+    el.gaugeLb.textContent = p.overtime ? '1.5배 적립 중 🌙' : '다음 도토리까지';
+    const hp = C.staminaAt(data, t);
+    el.barNote.textContent =
+      hp < 25
+        ? `🥱 체력이 얼마 안 남았어요 · ${C.clockLeft(C.exhaustAt(data.session, s) - t)} 뒤 집으로`
+        : `출근 ${C.hm(data.session.in)} · 근무 ${C.dur(p.minutes)}`;
+    el.go.removeAttribute('aria-disabled');
     el.go.dataset.kind = 'out';
     el.goIc.textContent = '🏠';
     el.goLb.textContent = '퇴근하기';
@@ -453,12 +513,54 @@ function renderHud(t) {
     el.sideV.classList.remove('ot');
     el.gauge.hidden = true;
     const spot = world.ctx.spot;
-    el.barNote.textContent = spot === 'bed' ? '쉿, 자는 중이에요 🌙' : C.isWorkday(t, s) ? `오늘 출근 시간 ${s.start}` : '오늘은 쉬는 날이에요 🌿';
-    el.go.dataset.kind = 'in';
-    el.goIc.textContent = '🚇';
-    el.goLb.textContent = '출근하기';
+    const until = C.restUntil(data);
+    if (t < until) {
+      // the 6-hour rest at home
+      el.barNote.textContent = `${spot === 'bed' ? '쉿, 자는 중이에요 🌙' : `${C.REST_HOURS}시간은 푹 쉬어요`} · ${C.hm(until)}부터 출근할 수 있어요`;
+      el.go.dataset.kind = 'rest';
+      el.go.setAttribute('aria-disabled', 'true');
+      el.goIc.textContent = spot === 'bed' ? '💤' : '🛋️';
+      el.goLb.textContent = `쉬는 중 · ${C.clockLeft(until - t)}`;
+    } else {
+      el.barNote.textContent = spot === 'bed' ? '쉿, 자는 중이에요 🌙' : C.isWorkday(t, s) ? `오늘 출근 시간 ${s.start}` : '오늘은 쉬는 날이에요 🌿';
+      el.go.removeAttribute('aria-disabled');
+      el.go.dataset.kind = 'in';
+      el.goIc.textContent = '🚇';
+      el.goLb.textContent = '출근하기';
+    }
   }
+  renderHp(t);
   lastToday = today;
+  // the card grows with the acorn gauge: keep the scene clear of it
+  const ch = el.gauge.parentElement.offsetHeight;
+  if (ch !== lastCardH) {
+    lastCardH = ch;
+    fitInsets();
+  }
+}
+
+/** the stamina bar: draining at work (striped in overtime), refilling at home */
+function renderHp(t) {
+  const hp = C.staminaAt(data, t);
+  const max = C.STAMINA.max;
+  let trend = 'full';
+  let lb = '체력';
+  if (data.session) {
+    trend = world.ctx.overtime ? 'fast' : 'down';
+    if (world.ctx.overtime) lb = '야근 2배 소모';
+  } else if (hp < max - 1e-6) {
+    trend = 'up';
+    lb = world.ctx.spot === 'bed' ? '자면서 회복' : '회복 중';
+  }
+  const v = data.session ? Math.ceil(hp - 1e-9) : Math.floor(hp + 1e-9);
+  el.hp.dataset.level = hp >= 50 ? 'high' : hp >= 20 ? 'mid' : 'low';
+  el.hp.dataset.trend = trend;
+  // half-percent steps: rewriting the width every tick would keep restarting its transition
+  const width = `${(Math.round((hp / max) * 200) / 2).toFixed(1)}%`;
+  if (el.hpFill.style.width !== width) el.hpFill.style.width = width;
+  el.hpLb.textContent = lb;
+  el.hpV.textContent = String(v);
+  el.hpBar.setAttribute('aria-valuenow', String(v));
 }
 
 function celebrate() {

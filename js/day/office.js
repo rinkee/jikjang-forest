@@ -5,15 +5,16 @@
  * little above the floor) behind an open desk, so its legs show underneath.
  * A basket on the desk fills with acorns as the day goes on.
  */
-import { THREE, mat, box, cyl, ball, plane, group, shade, signTex, screenTex, acorn, acornPile, canvasTex, wallClock, sunPatch } from './kit.js';
+import { THREE, mat, box, cyl, ball, plane, group, shade, signTex, screenTex, acorn, acornPile, canvasTex, wallClock, sunPatch, FONT } from './kit.js';
 import { Routine } from './world.js';
+import { todosFor } from './todo.js';
 
 const WALL_Z = -2.6;
 const SINK = 0.26; // the leg pivot ends up at 0.56: thighs rest on a seat at 0.37
 const SEAT_Y = 0.37;
 const DESK_Y = 0.9; // top surface; the knees (0.75) clear its underside
 const BASKET = new THREE.Vector3(-1.72, DESK_Y, 0.84);
-const MUG_SPOT = new THREE.Vector3(0.92, DESK_Y, 0.95);
+const MUG_SPOT = new THREE.Vector3(0.66, DESK_Y, 1.02);
 const PER_ACORN_IN_PILE = 10; // one acorn in the basket for every 10 earned
 const PILE_MAX = 64; // the basket holds fewer (see acornPile); it is full at about 500 acorns
 
@@ -21,6 +22,48 @@ const PILE_MAX = 64; // the basket holds fewer (see acornPile); it is full at ab
 const TYPE = [-0.08, -0.18, 0.46]; // y is replaced by the desk height below the shoulder (see reach)
 const POLE_OUT = (sx) => [sx * 1, -0.6, -0.4];
 const mirror = (v, side) => (side === 'L' ? [-v[0], v[1], v[2]] : v);
+const MONITOR = [1.3, 0.95]; // x, z on the desk; the screen turns toward the character
+
+/** whiteboard: today's to-do list, the first `done` items ticked off */
+function drawBoard(c, w, h, items, done) {
+  c.fillStyle = '#fbfbf7';
+  c.fillRect(0, 0, w, h);
+  c.textBaseline = 'middle';
+  c.textAlign = 'center';
+  c.fillStyle = '#5aa9e6';
+  c.font = `58px ${FONT}`;
+  c.fillText('오늘의 할 일', w / 2, 50);
+  c.fillRect(w / 2 - 150, 86, 300, 5);
+  c.textAlign = 'left';
+  const x0 = 96;
+  items.forEach((text, i) => {
+    const y = 136 + i * 66;
+    const ok = i < done;
+    // box, ticked in green when done
+    c.lineWidth = 6;
+    c.strokeStyle = ok ? '#5bb36a' : '#7a5d45';
+    c.strokeRect(36, y - 21, 42, 42);
+    if (ok) {
+      c.strokeStyle = '#3f8f4f';
+      c.lineWidth = 9;
+      c.lineCap = 'round';
+      c.beginPath();
+      c.moveTo(42, y - 2);
+      c.lineTo(56, y + 14);
+      c.lineTo(84, y - 26);
+      c.stroke();
+    }
+    let size = 48;
+    c.font = `${size}px ${FONT}`;
+    while (size > 30 && c.measureText(text).width > w - x0 - 18) c.font = `${(size -= 2)}px ${FONT}`;
+    c.fillStyle = ok ? '#a99c8d' : '#4a3323';
+    c.fillText(text, x0, y + 3);
+    if (ok) {
+      c.fillStyle = '#a99c8d';
+      c.fillRect(x0 - 4, y + 2, c.measureText(text).width + 8, 4);
+    }
+  });
+}
 /* sitting legs: thighs forward and a little apart, shins down; swing > 0 kicks the feet */
 const sitLegs = (swing = 0, rate = 2.6) => (side, t) => ({
   hip: [-1.5, 0, side === 'L' ? -0.07 : 0.07],
@@ -78,25 +121,38 @@ export function buildOffice(world) {
 
   // wall clock showing the real time
   const clock = wallClock();
-  clock.group.position.set(0.85, 3.45, WALL_Z + 0.07);
+  clock.group.position.set(0.6, 3.45, WALL_Z + 0.07);
   g.add(clock.group);
 
   // sunlight through the window onto the floor
   const patch = sunPatch(2.2, 1.6);
   g.add(patch);
 
-  // whiteboard with today's plan, sticky notes around it
+  // whiteboard with today's to-do list (by department, new every day), sticky notes around it
+  const boardTex = canvasTex(520, 312, (c, w, h) => drawBoard(c, w, h, [], 0));
   const board = group(
     box(1.9, 1.2, 0.06, mat('#fbfbf7'), 0, 0, 0, 0.04),
-    plane(1.75, 1.05, new THREE.MeshStandardMaterial({ map: signTex([{ text: '오늘의 할 일', size: 58, color: '#5aa9e6' }, { text: '✔ 보고서', size: 46 }, { text: '□ 도토리 줍기', size: 46 }], { w: 384, h: 240, bg: '#fbfbf7', r: 0, color: '#4a3323' }), roughness: 0.5 }), 0, 0, 0.035),
+    plane(1.75, 1.05, new THREE.MeshStandardMaterial({ map: boardTex, roughness: 0.5 }), 0, 0, 0.035),
     box(2.0, 0.07, 0.12, mat('#9aa3ad'), 0, -0.64, 0.04, 0.02)
   );
-  board.position.set(2.75, 3.05, WALL_Z + 0.05);
+  board.position.set(2.45, 3.05, WALL_Z + 0.05);
   g.add(board);
+  let boardKey = null;
+  const setBoard = (dept, ms, done) => {
+    const d = new Date(ms);
+    const key = `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}|${dept || ''}|${done}`;
+    if (key === boardKey) return;
+    boardKey = key;
+    const c = boardTex.userData.canvas;
+    drawBoard(c.getContext('2d'), c.width, c.height, todosFor(dept, ms), done);
+    boardTex.needsUpdate = true;
+  };
+  // repaint once the web font has loaded
+  if (typeof document !== 'undefined' && document.fonts && document.fonts.ready) document.fonts.ready.then(() => (boardKey = null));
   [
-    ['#fdf0b8', 1.5, 3.4, 0.1],
-    ['#ffe3ea', 1.62, 2.82, -0.12],
-    ['#dff2d8', 4.0, 3.3, -0.06],
+    ['#fdf0b8', 1.3, 2.62, 0.1],
+    ['#ffe3ea', 3.72, 3.38, -0.12],
+    ['#dff2d8', 4.12, 2.92, -0.06],
   ].forEach(([c, x, y, r]) => {
     const n = plane(0.34, 0.34, mat(c), x, y, WALL_Z + 0.04);
     n.rotation.z = r;
@@ -179,16 +235,20 @@ export function buildOffice(world) {
   keyboard.position.set(0, DESK_Y + 0.025, 0.58);
   g.add(keyboard, ball(0.08, mat('#f4f1ea'), 0.9, DESK_Y + 0.03, 0.6, 1, 0.45, 1.3));
 
-  // monitor, turned toward the character
+  // monitor: the screen faces the character, so from here we see its back (with an acorn logo)
   const screenMat = new THREE.MeshStandardMaterial({ map: screenTex(), emissive: '#ffffff', emissiveMap: null, emissiveIntensity: 0.0, roughness: 0.4 });
+  const logo = acorn(1.5);
+  logo.position.set(0, 0.9, -0.07);
   const monitor = group(
     box(0.5, 0.04, 0.34, mat('#8a8f99'), 0, 0.02, 0, 0.02),
-    cyl(0.05, 0.05, 0.42, mat('#8a8f99'), 0, 0.25, -0.02),
-    box(1.36, 0.88, 0.08, mat('#3f4652'), 0, 0.86, 0, 0.05),
-    plane(1.24, 0.76, screenMat, 0, 0.86, 0.045)
+    cyl(0.05, 0.05, 0.42, mat('#8a8f99'), 0, 0.25, -0.06),
+    box(0.36, 0.26, 0.06, mat('#5d6470'), 0, 0.62, -0.06, 0.03), // stand bracket on the back
+    box(1.2, 0.78, 0.08, mat('#3f4652'), 0, 0.86, 0, 0.05),
+    plane(1.08, 0.66, screenMat, 0, 0.86, 0.045),
+    logo
   );
-  monitor.position.set(1.78, DESK_Y, 0.76);
-  monitor.rotation.y = -0.5;
+  monitor.position.set(MONITOR[0], DESK_Y, MONITOR[1]);
+  monitor.rotation.y = Math.atan2(-MONITOR[0], -MONITOR[1]);
   g.add(monitor);
 
   // name plate on the front edge
@@ -247,11 +307,12 @@ export function buildOffice(world) {
   const resting = (side) => ({ hand: mirror([-0.1, reach.y - 0.02, 0.44], side), pole: POLE_OUT(side === 'L' ? -1 : 1), flex: -0.1 });
   const ctxRef = { ctx: world.ctx };
   const late = () => !!ctxRef.ctx.overtime;
+  const weary = () => (ctxRef.ctx.stamina ?? 100) < 25;
 
   const head = { x: 0, y: 0, z: 0 };
   const act = (id, w, dur, status, pose, extra) => Object.assign({ id, w, dur, status, pose }, extra);
   const routine = new Routine(world, [
-    act('type', 6, [10, 24], () => (late() ? '야근 중… 🌙' : '열심히 일하는 중 ⌨️'), { arm: typing, leg: sitLegs(0.18), head: { x: 0.05, y: 0.22, z: 0 } }),
+    act('type', 6, [10, 24], () => (weary() ? '기운 없이 일하는 중… 🥱' : late() ? '야근 중… 🌙' : '열심히 일하는 중 ⌨️'), { arm: typing, leg: sitLegs(0.18), head: { x: 0.05, y: 0.34, z: 0 } }),
     act('coffee', 1.4, [6, 9], '커피 한 모금 ☕', {
       arm: (side, t) => (side === 'R' ? { hand: [-0.02, reach.y + 0.15, 0.44], pole: [1, -0.5, -0.5], flex: 0.3 } : typing(side, t)),
       leg: sitLegs(0.08, 1.6),
@@ -328,6 +389,7 @@ export function buildOffice(world) {
         plateMat.needsUpdate = true;
       }
       lastAcorns = ctx.todayAcorns || 0;
+      boardKey = null;
       shown = -1;
       setPile(lastAcorns, false);
       falling.splice(0).forEach((a) => g.remove(a));
@@ -348,11 +410,14 @@ export function buildOffice(world) {
       // the real time on the wall clock
       const d = new Date(ctx.now ? ctx.now() : Date.now());
       clock.set(d);
+      setBoard(ctx.dept, d.getTime(), ctx.todoDone ?? 1);
 
       // lunch hour and how sleepy the character is
       const h = d.getHours() + d.getMinutes() / 60;
       routine.force(ctx.lunch ? 'lunch' : ctx.act || null);
-      dozeAct.w = ctx.overtime ? 2.5 : h >= 14 && h < 16 ? 2 : 0.7;
+      // and when it is running out of stamina
+      const st = ctx.stamina ?? 100;
+      dozeAct.w = st < 10 ? 6 : st < 25 ? 3.5 : ctx.overtime ? 2.5 : h >= 14 && h < 16 ? 2 : 0.7;
       routine.update(dt, t);
       const cur = routine.cur && routine.cur.id;
       lunch.visible = cur === 'lunch';

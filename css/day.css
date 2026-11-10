@@ -256,6 +256,111 @@ button {
   font-size: 12px;
   color: var(--ink-2);
 }
+.gauge-ic {
+  flex: none;
+  font-size: 14px;
+  vertical-align: 0;
+}
+.gauge,
+.hp {
+  gap: 8px;
+}
+
+/* stamina: drains at work (twice as fast in overtime), refills at home */
+.hp {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 4px;
+  --hp: #5bb36a;
+  --hp-2: #8fd17a;
+}
+.hp[data-level='mid'] {
+  --hp: #e0a92e;
+  --hp-2: #f6d04d;
+}
+.hp[data-level='low'] {
+  --hp: #d9533f;
+  --hp-2: #f08a6c;
+}
+.hp-ic {
+  flex: none;
+  font-size: 14px;
+  line-height: 1;
+}
+.hp-bar {
+  position: relative;
+  flex: 1;
+  height: 12px;
+  border-radius: 99px;
+  background: #f0e3c6;
+  overflow: hidden;
+  box-shadow: inset 0 1px 2px rgba(74, 51, 35, 0.15);
+}
+.hp-bar i {
+  display: block;
+  height: 100%;
+  width: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, var(--hp), var(--hp-2));
+  transition: width 0.4s ease-out, background 0.4s;
+}
+/* overtime: diagonal stripes slide along (draining twice as fast) */
+.hp[data-trend='fast'] .hp-bar i {
+  background-image: repeating-linear-gradient(-45deg, rgba(255, 255, 255, 0.28) 0 6px, transparent 6px 12px), linear-gradient(90deg, var(--hp), var(--hp-2));
+  background-size: 17px 100%, 100% 100%;
+  animation: hp-drain 0.8s linear infinite;
+}
+@keyframes hp-drain {
+  to {
+    background-position: -17px 0, 0 0;
+  }
+}
+/* recovering at home: a soft shine moves across */
+.hp[data-trend='up'] .hp-bar i {
+  background-image: linear-gradient(90deg, transparent 0 40%, rgba(255, 255, 255, 0.45) 50%, transparent 60% 100%), linear-gradient(90deg, var(--hp), var(--hp-2));
+  background-size: 250% 100%, 100% 100%;
+  animation: hp-shine 2.4s ease-in-out infinite;
+}
+@keyframes hp-shine {
+  from {
+    background-position: 100% 0, 0 0;
+  }
+  to {
+    background-position: -150% 0, 0 0;
+  }
+}
+.hp[data-level='low'][data-trend='down'] .hp-bar,
+.hp[data-level='low'][data-trend='fast'] .hp-bar {
+  animation: hp-blink 1.2s ease-in-out infinite;
+}
+@keyframes hp-blink {
+  50% {
+    box-shadow: inset 0 1px 2px rgba(74, 51, 35, 0.15), 0 0 0 2px rgba(217, 83, 63, 0.45);
+  }
+}
+.hp-lb {
+  flex: none;
+  font-size: 12px;
+  color: var(--ink-2);
+  white-space: nowrap;
+}
+.hp-lb b {
+  display: inline-block;
+  min-width: 2ch;
+  font-weight: normal;
+  font-size: 15px;
+  color: var(--hp);
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+@media (prefers-reduced-motion: reduce) {
+  .hp .hp-bar,
+  .hp .hp-bar i {
+    animation: none !important;
+  }
+}
 
 .status {
   margin: 0;
@@ -362,6 +467,31 @@ button {
 .go:disabled {
   filter: grayscale(0.4);
   opacity: 0.7;
+}
+/* resting at home: the button shows how long is left and cannot clock in */
+.go[data-kind='rest'] {
+  background: #8fa3c4;
+  box-shadow: 0 6px 0 #66789a, 0 12px 24px rgba(80, 96, 130, 0.25);
+  font-size: 21px;
+  font-variant-numeric: tabular-nums;
+}
+.go[data-kind='rest']:active {
+  transform: translateY(2px);
+  box-shadow: 0 4px 0 #66789a;
+}
+.bar-note.nudge {
+  animation: nudge 0.45s ease-in-out;
+  color: var(--ink);
+}
+@keyframes nudge {
+  20%,
+  60% {
+    transform: translateX(-6px);
+  }
+  40%,
+  80% {
+    transform: translateX(6px);
+  }
 }
 .go-ic {
   font-size: 26px;

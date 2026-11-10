@@ -5,6 +5,7 @@
  *   ready  morning, getting ready: pacing in front of the window, stretching, waving
  *   table  sitting on a floor cushion, legs stretched out under a blanket-covered low table
  *   bed    asleep on its side, facing us, knees drawn up under a puffy duvet
+ * ctx.sleepWhy ('tired' | 'late') says it went to bed early to catch up after work.
  */
 import { THREE, mat, box, cyl, ball, plane, group, shade, canvasTex, glow, zzz, wallClock, sunPatch } from './kit.js';
 import { Routine } from './world.js';
@@ -14,6 +15,8 @@ const SIT = 0.57; // sitting on the floor cushion: the torso bottom rests on its
 const TABLE_TOP = 0.65; // hands rest here; the legs (0.06..0.44) fit under it
 const PACE = [0.9, 1.95]; // how far the character paces in the morning (x), between table and bed
 const READY = [1.2, 0, 0.45];
+const TV = [-3.55, -1.05]; // x, z: the screen turns toward the character at the table
+const TV_YAW = -0.5; // the character half turns toward the TV while watching
 const BED = { head: [5.9, 1.82, -0.75] }; // where the head rests on the pillow
 const mirror = (v, side) => (side === 'L' ? [-v[0], v[1], v[2]] : v);
 
@@ -153,7 +156,7 @@ export function buildHome(world) {
   dinner.visible = false;
   g.add(bowl, dinner);
 
-  // TV on a low stand, turned toward the table
+  // TV on a low stand; the screen faces the character at the table, not us
   const tvScreen = new THREE.MeshStandardMaterial({ map: cartoon(), emissive: '#ffffff', emissiveIntensity: 0.25, roughness: 0.5 });
   tvScreen.emissiveMap = tvScreen.map;
   const tv = group(
@@ -162,8 +165,8 @@ export function buildHome(world) {
     plane(1.8, 1.0, tvScreen, 0, 1.2, 0.065),
     cyl(0.08, 0.1, 0.1, mat('#3f4652'), 0, 0.6, 0)
   );
-  tv.position.set(-3.55, 0, -1.05);
-  tv.rotation.y = 0.55;
+  tv.position.set(TV[0], 0, TV[1]);
+  tv.rotation.y = Math.atan2(TABLE_X - TV[0], -TV[1]);
   g.add(tv);
 
   // floor lamp (lit in the evening)
@@ -225,7 +228,7 @@ export function buildHome(world) {
         head: { x: 0.12, y: 0, z: 0 },
       },
     },
-    { id: 'tv', w: 3, dur: [10, 18], status: 'TV 보는 중 📺', pose: { arm: onTable, leg: legsOut, head: { x: 0.02, y: -0.42, z: -0.04 } } },
+    { id: 'tv', w: 3, dur: [10, 18], status: 'TV 보는 중 📺', pose: { arm: onTable, leg: legsOut, head: { x: 0.02, y: -0.45, z: -0.04 } } },
     {
       id: 'phone',
       w: 2,
@@ -305,7 +308,8 @@ export function buildHome(world) {
   // hands tucked in front of the belly so they stay under the duvet
   const tucked = (side) => ({ hand: mirror([-0.12, -0.4, 0.25], side), pole: [side === 'L' ? -1 : 1, -0.4, -0.6] });
   const curled = (side) => ({ hip: [-0.6, 0, 0], knee: side === 'L' ? 1.1 : 0.9, ankle: 0.3 });
-  const bedActs = new Routine(world, [{ id: 'sleep', w: 1, dur: [999, 999], status: '쿨쿨 자는 중 💤', pose: { arm: tucked, leg: curled, head: { x: 0, y: 0, z: 0.05 }, eyes: 'closed' } }]);
+  const sleepStatus = () => ({ tired: '지쳐서 곯아떨어졌어요 💤', late: '야근하고 와서 꿀잠 자는 중 💤' })[world.ctx.sleepWhy] || '쿨쿨 자는 중 💤';
+  const bedActs = new Routine(world, [{ id: 'sleep', w: 1, dur: [999, 999], status: sleepStatus, pose: { arm: tucked, leg: curled, head: { x: 0, y: 0, z: 0.05 }, eyes: 'closed' } }]);
   const routines = { table: tableActs, ready: readyActs, bed: bedActs };
 
   let spot = null;
@@ -377,6 +381,10 @@ export function buildHome(world) {
         const face = walk.moving ? (Math.sign(walk.to - walk.x) * Math.PI) / 2 : 0;
         const a = w.character.anim;
         a.yaw += (face - a.yaw) * Math.min(1, dt * 7);
+      } else if (spot === 'table') {
+        // turn toward the TV while watching it
+        const a = w.character.anim;
+        a.yaw += ((cur === 'tv' ? TV_YAW : 0) - a.yaw) * Math.min(1, dt * 2.5);
       }
       dinner.visible = spot === 'table' && cur === 'eat' && dinnerTime();
       phone.visible = spot === 'table' && cur === 'phone';
@@ -388,6 +396,7 @@ export function buildHome(world) {
         phone.rotation.set(-0.5, 0, 0);
       }
       if (spot === 'bed') {
+        world.status(sleepStatus());
         zs.forEach((z) => {
           const u = (t * 0.28 + z.userData.phase) % 1;
           z.position.set(BED.head[0] - 0.7 - u * 0.5, BED.head[1] + 1.0 + u * 1.3, BED.head[2] + 0.6);

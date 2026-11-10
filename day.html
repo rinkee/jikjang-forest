@@ -62,8 +62,14 @@
         <b class="side-v" id="sideV">0</b>
       </div>
       <div class="gauge" id="gauge" hidden>
+        <span class="ac gauge-ic" aria-hidden="true"></span>
         <div class="gauge-bar"><i id="gaugeFill"></i></div>
         <span class="gauge-lb" id="gaugeLb">다음 도토리까지</span>
+      </div>
+      <div class="hp" id="hp" data-level="high">
+        <span class="hp-ic" aria-hidden="true">⚡</span>
+        <div class="hp-bar" role="progressbar" aria-label="체력" aria-valuemin="0" aria-valuemax="100" id="hpBar"><i id="hpFill"></i></div>
+        <span class="hp-lb"><span id="hpLb">체력</span> <b id="hpV">100</b></span>
       </div>
     </div>
     <p class="status" id="status" aria-live="polite"></p>

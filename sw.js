@@ -7,7 +7,7 @@
  * endpoint are left alone.
  * Bump CACHE when the list below changes.
  */
-const CACHE = 'ccws-v1';
+const CACHE = 'ccws-v2';
 const SHELL = [
   './',
   './index.html',
@@ -36,6 +36,7 @@ const SHELL = [
   './js/day/office.js',
   './js/day/subway.js',
   './js/day/home.js',
+  './js/day/todo.js',
   './vendor/three/three.module.js',
   './vendor/three/addons/environments/RoomEnvironment.js',
   './vendor/three/addons/geometries/RoundedBoxGeometry.js',
