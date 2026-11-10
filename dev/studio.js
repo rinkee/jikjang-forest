@@ -17,6 +17,7 @@ import { World } from '../js/day/world.js';
 import { buildOffice } from '../js/day/office.js';
 import { buildSubway } from '../js/day/subway.js';
 import { buildHome } from '../js/day/home.js';
+import { sunTimes } from '../js/day/sky.js';
 
 const Q = new URLSearchParams(location.search);
 const TEST = Q.get('test') === '1';
@@ -87,14 +88,14 @@ function assignInPlace(dst, src) {
 }
 
 const SCENES = [
-  { key: 'office', name: '회사', set: 'office', ctx: {}, mood: 'day' },
-  { key: 'home_ready', name: '집 · 아침 (출근 준비)', set: 'home', ctx: { spot: 'ready' }, mood: 'morning' },
-  { key: 'home_table', name: '집 · 저녁 (테이블)', set: 'home', ctx: { spot: 'table' }, mood: 'dusk' },
-  { key: 'home_bed', name: '집 · 밤 (침대)', set: 'home', ctx: { spot: 'bed' }, mood: 'night' },
-  { key: 'subway_in', name: '지하철 · 출근', set: 'subway', ctx: { dir: 'in' }, mood: 'morning' },
-  { key: 'subway_out', name: '지하철 · 퇴근', set: 'subway', ctx: { dir: 'out' }, mood: 'dusk' },
+  // time: a typical moment for the place (minutes after midnight)
+  { key: 'office', name: '회사', set: 'office', ctx: {}, time: 14 * 60 },
+  { key: 'home_ready', name: '집 · 아침 (출근 준비)', set: 'home', ctx: { spot: 'ready' }, time: 7 * 60 + 40 },
+  { key: 'home_table', name: '집 · 저녁 (테이블)', set: 'home', ctx: { spot: 'table' }, time: 19 * 60 + 30 },
+  { key: 'home_bed', name: '집 · 밤 (침대)', set: 'home', ctx: { spot: 'bed' }, time: 23 * 60 + 30 },
+  { key: 'subway_in', name: '지하철 · 출근', set: 'subway', ctx: { dir: 'in' }, time: 8 * 60 + 20 },
+  { key: 'subway_out', name: '지하철 · 퇴근', set: 'subway', ctx: { dir: 'out' }, time: 17 * 60 + 40 },
 ];
-const MOODS = { morning: '아침', day: '낮', dusk: '노을', night: '밤' };
 const ACT_NAMES = {
   type: '타이핑', coffee: '커피', stretch: '기지개', think: '고민', doze: '꾸벅꾸벅', lunch: '점심 도시락',
   eat: '먹기', tv: 'TV 보기', phone: '폰 보기', relax: '쉬기', pace: '걸어 다니기', idle: '가만히',
@@ -109,7 +110,9 @@ const TURN_POSES = {
 
 const ui = {
   scene: SCENES.find((s) => s.key === Q.get('scene')) || SCENES[0],
-  mood: null,
+  minutes: 0, // time of day shown (minutes after midnight)
+  date: null, // 'YYYY-MM-DD'
+  live: false, // follow the real clock instead
   act: '',
   acorns: 230,
   phone: '390x844',
@@ -118,7 +121,17 @@ const ui = {
   seed: +(Q.get('seed') || 3),
   turnPose: 'stand',
 };
-ui.mood = ui.scene.mood;
+ui.minutes = ui.scene.time;
+{
+  const d = new Date();
+  ui.date = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+/** the moment the studio shows (local time) */
+function studioNow() {
+  if (ui.live) return Date.now();
+  const [y, m, d] = ui.date.split('-').map(Number);
+  return new Date(y, m - 1, d, Math.floor(ui.minutes / 60), ui.minutes % 60).getTime();
+}
 
 /* ============================================================== character look */
 function savedLook() {
@@ -165,7 +178,8 @@ function layoutPhone() {
 
 function showScene() {
   const sc = ui.scene;
-  world.setMood(ui.mood);
+  world.ctx.now = studioNow; // wall clocks show the chosen time
+  world.setTime(studioNow());
   world.ctx.act = ui.act || null;
   world.ctx.todayAcorns = ui.acorns;
   world.show(sc.set, Object.assign({ spot: undefined, dir: undefined }, sc.ctx, { act: ui.act || null }));
@@ -500,17 +514,56 @@ select(gChar, '옆 화면 자세', Object.entries(TURN_POSES).map(([k, p]) => [k
 const gPlace = group('장소');
 select(gPlace, '장소', SCENES.map((s) => [s.key, s.name]), ui.scene.key, (v) => {
   ui.scene = SCENES.find((s) => s.key === v);
-  ui.mood = ui.scene.mood;
+  ui.minutes = ui.scene.time;
   ui.act = '';
-  moodRow.sel.value = ui.mood;
+  showTime();
   showScene();
   targetRows.forEach((r) => r.refresh());
   $('#targetTitle').textContent = `카메라 중심 · ${ui.scene.name}`;
 });
-const moodRow = select(gPlace, '시간대', Object.entries(MOODS), ui.mood, (v) => {
-  ui.mood = v;
-  world.setMood(v);
+// ---- time of day: a date and a time (or the real clock); the sky is worked out from the sun
+const timeBox = document.createElement('div');
+timeBox.innerHTML = `
+  <div class="pick"><span>날짜</span><input type="date" id="tDate" style="flex:1;padding:3px 6px;border-radius:8px;border:1px solid var(--line)"></div>
+  <div class="row"><label><span>시각</span><b id="tLabel" style="font-weight:normal;color:var(--warm-d)"></b></label><input type="range" id="tRange" min="0" max="1435" step="5" style="grid-column:1/-1"></div>
+  <p class="hint" id="tSun"></p>
+  <label class="pick"><input type="checkbox" id="tLive"><span>실제 시간 따라가기</span></label>`;
+gPlace.append(timeBox);
+const tDate = timeBox.querySelector('#tDate');
+const tRange = timeBox.querySelector('#tRange');
+const tLive = timeBox.querySelector('#tLive');
+function showTime() {
+  const t = studioNow();
+  const d = new Date(t);
+  tDate.value = ui.date;
+  tRange.value = ui.live ? d.getHours() * 60 + d.getMinutes() : ui.minutes;
+  [tDate, tRange].forEach((i) => (i.disabled = ui.live));
+  const hm = (ms) => (ms ? new Date(ms).toTimeString().slice(0, 5) : '--:--');
+  $('#tLabel').textContent = `${hm(t)} · ${{ morning: '아침', day: '낮', dusk: '저녁노을', night: '밤' }[world.mood] || ''}`;
+  const st = sunTimes(t);
+  $('#tSun').textContent = `해 뜨는 시각 ${hm(st.rise)} · 해 지는 시각 ${hm(st.set)} (서울 기준)`;
+}
+tDate.addEventListener('change', () => {
+  if (!tDate.value) return;
+  ui.date = tDate.value;
+  world.setTime(studioNow());
+  showTime();
 });
+tRange.addEventListener('input', () => {
+  ui.minutes = +tRange.value;
+  world.setTime(studioNow());
+  showTime();
+});
+tLive.addEventListener('change', () => {
+  ui.live = tLive.checked;
+  world.setTime(studioNow());
+  showTime();
+});
+setInterval(() => {
+  if (!ui.live) return;
+  world.setTime(studioNow());
+  showTime();
+}, 1000);
 const actRow = select(gPlace, '동작', [['', '자동']], '', (v) => {
   ui.act = v;
   world.ctx.act = v || null;
@@ -654,6 +707,7 @@ $('#btnCloseModal').addEventListener('click', () => ($('#saveModal').hidden = tr
 layoutPhone();
 window.addEventListener('resize', layoutPhone);
 await applyProportions();
+showTime();
 updateBadge();
 (function loop() {
   requestAnimationFrame(loop);
@@ -665,6 +719,14 @@ window.studio = {
   orbit,
   T,
   ui,
+  /** for tests and the console: studio.setTime('17:20') or studio.setTime('12:00', '2026-06-21') */
+  setTime(hhmm, date) {
+    const [h, m] = hhmm.split(':').map(Number);
+    ui.minutes = h * 60 + m;
+    if (date) ui.date = date;
+    world.setTime(studioNow());
+    showTime();
+  },
   /** for tests and the console: studio.setProp('head', 0.85) */
   async setProp(k, v) {
     T.character[k] = v;

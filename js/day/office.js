@@ -5,7 +5,7 @@
  * little above the floor) behind an open desk, so its legs show underneath.
  * A basket on the desk fills with acorns as the day goes on.
  */
-import { THREE, mat, box, cyl, ball, plane, group, shade, windowTex, signTex, screenTex, acorn, acornPile, canvasTex } from './kit.js';
+import { THREE, mat, box, cyl, ball, plane, group, shade, signTex, screenTex, acorn, acornPile, canvasTex, wallClock, sunPatch } from './kit.js';
 import { Routine } from './world.js';
 
 const WALL_Z = -2.6;
@@ -62,7 +62,8 @@ export function buildOffice(world) {
   g.add(floor, wall, wainscot, rail, rugEdge, rug);
 
   // window (sky follows the time of day)
-  const glassMat = new THREE.MeshBasicMaterial({ map: windowTex('office', 'day'), toneMapped: false });
+  // the view outside is painted from the real time of day (sky.js)
+  const glassMat = new THREE.MeshBasicMaterial({ map: world.painter.texture('office'), toneMapped: false });
   const win = group(
     plane(2.5, 1.8, glassMat, 0, 0, 0),
     box(2.7, 0.14, 0.12, mat('#ffffff'), 0, 0.97, 0.03, 0.04),
@@ -76,28 +77,13 @@ export function buildOffice(world) {
   g.add(win);
 
   // wall clock showing the real time
-  const clock = new THREE.Group();
-  const face = cyl(0.44, 0.44, 0.06, mat('#fffaf0'), 0, 0, 0, 40);
-  face.rotation.x = Math.PI / 2;
-  const rim = new THREE.Mesh(new THREE.TorusGeometry(0.45, 0.05, 10, 40), mat('#a8754a'));
-  clock.add(face, shade(rim));
-  for (let i = 0; i < 12; i++) {
-    const a = (i / 12) * Math.PI * 2;
-    clock.add(ball(i % 3 ? 0.018 : 0.03, mat('#7a5d45'), Math.sin(a) * 0.35, Math.cos(a) * 0.35, 0.04));
-  }
-  const hand = (len, w, color) => {
-    const p = new THREE.Group();
-    const m = box(w, len, 0.02, mat(color), 0, len / 2 - 0.04, 0, 0.008);
-    p.add(m);
-    p.position.z = 0.05;
-    clock.add(p);
-    return p;
-  };
-  const hourHand = hand(0.22, 0.045, '#4a3323');
-  const minHand = hand(0.32, 0.03, '#4a3323');
-  clock.add(ball(0.035, mat('#e5584f'), 0, 0, 0.07));
-  clock.position.set(0.85, 3.45, WALL_Z + 0.07);
-  g.add(clock);
+  const clock = wallClock();
+  clock.group.position.set(0.85, 3.45, WALL_Z + 0.07);
+  g.add(clock.group);
+
+  // sunlight through the window onto the floor
+  const patch = sunPatch(2.2, 1.6);
+  g.add(patch);
 
   // whiteboard with today's plan, sticky notes around it
   const board = group(
@@ -349,19 +335,19 @@ export function buildOffice(world) {
       routine.forced = null;
       routine.start('type');
     },
-    mood(m) {
-      glassMat.map = windowTex('office', m);
-      glassMat.needsUpdate = true;
-      screenMat.emissiveIntensity = m === 'night' ? 0.35 : m === 'dusk' ? 0.15 : 0.0;
-      screenMat.emissiveMap = screenMat.map;
-      screenMat.needsUpdate = true;
+    sky(s) {
+      // the monitor glows more as the room gets dark
+      screenMat.emissiveIntensity = 0.35 * s.dark;
+      if (screenMat.emissiveMap !== screenMat.map) {
+        screenMat.emissiveMap = screenMat.map;
+        screenMat.needsUpdate = true;
+      }
+      patch.userData.update(s, -1.7, WALL_Z);
     },
     update(dt, t, ctx, w) {
       // the real time on the wall clock
       const d = new Date(ctx.now ? ctx.now() : Date.now());
-      const mins = d.getHours() * 60 + d.getMinutes() + d.getSeconds() / 60;
-      minHand.rotation.z = -((mins % 60) / 60) * Math.PI * 2;
-      hourHand.rotation.z = -(((mins / 60) % 12) / 12) * Math.PI * 2;
+      clock.set(d);
 
       // lunch hour and how sleepy the character is
       const h = d.getHours() + d.getMinutes() / 60;

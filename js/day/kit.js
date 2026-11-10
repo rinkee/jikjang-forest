@@ -88,145 +88,6 @@ function rng(seed) {
   };
 }
 
-export const SKY = {
-  morning: ['#9fd3f2', '#d9effa', '#fff3d6'],
-  day: ['#6fc0ee', '#a8dbf6', '#e4f5fc'],
-  dusk: ['#5b5aa8', '#e98a7a', '#ffc98a'],
-  night: ['#141a3a', '#23305e', '#3a4677'],
-};
-
-function paintSky(g, w, h, mood, R) {
-  const [a, b, c] = SKY[mood] || SKY.day;
-  const grd = g.createLinearGradient(0, 0, 0, h);
-  grd.addColorStop(0, a);
-  grd.addColorStop(0.6, b);
-  grd.addColorStop(1, c);
-  g.fillStyle = grd;
-  g.fillRect(0, 0, w, h);
-  if (mood === 'night') {
-    for (let i = 0; i < 70; i++) {
-      g.fillStyle = `rgba(255,250,220,${0.4 + R() * 0.6})`;
-      const s = R() < 0.15 ? 2.4 : 1.4;
-      g.fillRect(R() * w, R() * h * 0.6, s, s);
-    }
-  } else {
-    // puffy clouds
-    const cl = mood === 'dusk' ? 'rgba(255,214,190,0.8)' : 'rgba(255,255,255,0.9)';
-    g.fillStyle = cl;
-    for (let i = 0; i < 5; i++) {
-      const x = R() * w;
-      const y = h * (0.12 + R() * 0.3);
-      const s = h * (0.05 + R() * 0.05);
-      for (let k = 0; k < 4; k++) {
-        g.beginPath();
-        g.arc(x + (k - 1.5) * s * 0.9, y + (k % 2 ? -s * 0.35 : 0), s * (k % 2 ? 0.95 : 0.75), 0, Math.PI * 2);
-        g.fill();
-      }
-    }
-  }
-}
-
-/** low city + forest skyline along the bottom of a canvas */
-function paintSkyline(g, w, h, mood, R, o) {
-  o = o || {};
-  const lit = mood === 'night' || mood === 'dusk';
-  const far = { morning: '#b7d6e0', day: '#9cc7d4', dusk: '#8b6f99', night: '#2c355e' }[mood];
-  const near = { morning: '#8fbf9a', day: '#78b487', dusk: '#6b5a7e', night: '#1f2747' }[mood];
-  const bld = { morning: '#e9dcc8', day: '#efe2cc', dusk: '#a98c99', night: '#2a3157' }[mood];
-  const base = h * (o.base ?? 1);
-  // far hills
-  g.fillStyle = far;
-  g.beginPath();
-  g.moveTo(0, base);
-  for (let x = 0; x <= w; x += w / 16) g.lineTo(x, base - h * (0.28 + 0.08 * Math.sin(x * 0.013 + 1) + 0.05 * Math.sin(x * 0.041)));
-  g.lineTo(w, base);
-  g.fill();
-  // buildings
-  let x = -10;
-  while (x < w) {
-    const bw = w * (0.05 + R() * 0.06);
-    const bh = h * (0.16 + R() * 0.28);
-    g.fillStyle = bld;
-    const r = Math.min(bw, 12) * 0.4;
-    g.beginPath();
-    g.roundRect(x, base - bh, bw, bh + 4, [r, r, 0, 0]);
-    g.fill();
-    // windows
-    const cols = Math.max(1, Math.floor(bw / 14));
-    const rows = Math.max(1, Math.floor(bh / 16));
-    for (let i = 0; i < cols; i++) {
-      for (let j = 0; j < rows - 1; j++) {
-        const on = lit ? R() < 0.55 : R() < 0.9;
-        g.fillStyle = lit ? (on ? '#ffd98a' : 'rgba(0,0,0,0.18)') : on ? 'rgba(120,170,200,0.45)' : 'rgba(255,255,255,0.4)';
-        g.fillRect(x + 5 + i * ((bw - 8) / cols), base - bh + 8 + j * 16, Math.max(3, (bw - 8) / cols - 5), 8);
-      }
-    }
-    x += bw + w * (0.005 + R() * 0.03);
-  }
-  // round trees in front
-  g.fillStyle = near;
-  for (let tx = 0; tx < w + 40; tx += w * (0.03 + R() * 0.04)) {
-    const r = h * (0.06 + R() * 0.07);
-    g.beginPath();
-    g.arc(tx, base - r * 0.6, r, 0, Math.PI * 2);
-    g.fill();
-  }
-  g.fillRect(0, base - h * 0.04, w, h * 0.04 + 2);
-}
-
-const skyCache = new Map();
-/** the view out of a window: 'office' (city) | 'home' (trees + houses) */
-export function windowTex(kind, mood) {
-  const key = kind + ':' + mood;
-  if (skyCache.has(key)) return skyCache.get(key);
-  const t = canvasTex(512, 384, (g, w, h) => {
-    const R = rng(kind === 'office' ? 7 : 19);
-    paintSky(g, w, h, mood, R);
-    if (mood === 'night') {
-      g.fillStyle = '#fff6cf';
-      g.beginPath();
-      g.arc(w * 0.78, h * 0.2, 22, 0, Math.PI * 2);
-      g.fill();
-      g.fillStyle = SKY.night[0];
-      g.beginPath();
-      g.arc(w * 0.78 + 9, h * 0.2 - 6, 19, 0, Math.PI * 2);
-      g.fill();
-    } else if (mood === 'dusk') {
-      g.fillStyle = 'rgba(255,190,120,0.95)';
-      g.beginPath();
-      g.arc(w * 0.3, h * 0.66, 34, 0, Math.PI * 2);
-      g.fill();
-    }
-    paintSkyline(g, w, h, mood, R, { base: 1 });
-  });
-  skyCache.set(key, t);
-  return t;
-}
-
-/** a long strip for the subway windows; scrolled with texture.offset.x */
-export function scrollTex(mood) {
-  const key = 'strip:' + mood;
-  if (skyCache.has(key)) return skyCache.get(key);
-  const t = canvasTex(2048, 320, (g, w, h) => {
-    const R = rng(31);
-    paintSky(g, w, h, mood, R);
-    // river glint band near the bottom, then the skyline sits above it
-    paintSkyline(g, w, h, mood, R, { base: 0.86 });
-    const water = { morning: '#7fc1d8', day: '#5fb0d0', dusk: '#a0719a', night: '#1b2244' }[mood];
-    g.fillStyle = water;
-    g.fillRect(0, h * 0.86, w, h * 0.14);
-    g.fillStyle = 'rgba(255,255,255,0.35)';
-    for (let i = 0; i < 40; i++) g.fillRect(R() * w, h * (0.88 + R() * 0.1), 18 + R() * 30, 2);
-    // bridge rail posts flicking past
-    g.fillStyle = 'rgba(60,60,70,0.55)';
-    for (let x = 0; x < w; x += 256) g.fillRect(x, 0, 10, h);
-  });
-  t.wrapS = THREE.RepeatWrapping;
-  t.repeat.set(0.5, 1);
-  skyCache.set(key, t);
-  return t;
-}
-
 /** text sign (name plate, posters) */
 export function signTex(lines, o) {
   o = o || {};
@@ -285,6 +146,80 @@ export function screenTex() {
       g.fillRect(w * 0.62 + i * 36, h - 30 - bh, 26, bh);
     }
   });
+}
+
+/**
+ * Wall clock that shows a given time: { group, set(date) }. Faces +Z; hang it on a wall.
+ */
+export function wallClock() {
+  const clock = new THREE.Group();
+  const face = cyl(0.44, 0.44, 0.06, mat('#fffaf0'), 0, 0, 0, 40);
+  face.rotation.x = Math.PI / 2;
+  const rim = new THREE.Mesh(new THREE.TorusGeometry(0.45, 0.05, 10, 40), mat('#a8754a'));
+  clock.add(face, shade(rim));
+  for (let i = 0; i < 12; i++) {
+    const a = (i / 12) * Math.PI * 2;
+    clock.add(ball(i % 3 ? 0.018 : 0.03, mat('#7a5d45'), Math.sin(a) * 0.35, Math.cos(a) * 0.35, 0.04));
+  }
+  const hand = (len, w) => {
+    const p = new THREE.Group();
+    p.add(box(w, len, 0.02, mat('#4a3323'), 0, len / 2 - 0.04, 0, 0.008));
+    p.position.z = 0.05;
+    clock.add(p);
+    return p;
+  };
+  const hourHand = hand(0.22, 0.045);
+  const minHand = hand(0.32, 0.03);
+  clock.add(ball(0.035, mat('#e5584f'), 0, 0, 0.07));
+  return {
+    group: clock,
+    set(d) {
+      const mins = d.getHours() * 60 + d.getMinutes() + d.getSeconds() / 60;
+      minHand.rotation.z = -((mins % 60) / 60) * Math.PI * 2;
+      hourHand.rotation.z = -(((mins / 60) % 12) / 12) * Math.PI * 2;
+    },
+  };
+}
+
+/**
+ * Sunlight through a window, as a soft bright patch on the floor in front of it (with the
+ * shadow of the window cross). update(sky, x, z): x = window centre, z = foot of the wall.
+ * Longer when the sun is low; slides sideways with the sun (morning one way, evening the other).
+ */
+let patchTex = null;
+export function sunPatch(width, depth) {
+  if (!patchTex) {
+    patchTex = canvasTex(256, 256, (g, w, h) => {
+      g.filter = 'blur(10px)';
+      g.fillStyle = '#ffffff';
+      g.fillRect(28, 20, w - 56, h - 40);
+      g.filter = 'none';
+      g.globalCompositeOperation = 'destination-out';
+      g.filter = 'blur(3px)';
+      g.fillRect(w / 2 - 5, 0, 10, h);
+      g.fillRect(0, h / 2 - 5, w, 10);
+      g.filter = 'none';
+      g.globalCompositeOperation = 'source-over';
+    });
+  }
+  const m = new THREE.Mesh(
+    new THREE.PlaneGeometry(1, 1),
+    new THREE.MeshBasicMaterial({ map: patchTex, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, opacity: 0, toneMapped: false })
+  );
+  m.rotation.x = -Math.PI / 2;
+  m.renderOrder = 1;
+  m.userData.update = (s, x, z) => {
+    const a = s.patch.amount;
+    m.visible = a > 0.01;
+    m.material.opacity = a;
+    m.material.color.set(s.patch.color);
+    const low = 1 - Math.min(1, Math.max(0, s.elev / 35));
+    const len = depth * (1.2 + 2.0 * low);
+    m.scale.set(width, len, 1);
+    m.rotation.z = s.patch.side * 0.45;
+    m.position.set(x - s.patch.side * len * 0.45, 0.014, z + len / 2);
+  };
+  return m;
 }
 
 /** soft round glow sprite texture */

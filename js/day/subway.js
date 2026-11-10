@@ -6,7 +6,7 @@
  * going home, the car is emptier: it sits on the bench, feet dangling, and nods off.
  * ctx.dir: 'in' | 'out', ctx.ride: 0..1 (the train slows down near the end).
  */
-import { THREE, mat, box, cyl, ball, plane, group, shade, scrollTex, canvasTex } from './kit.js';
+import { THREE, mat, box, cyl, ball, plane, group, shade, canvasTex } from './kit.js';
 import { Routine } from './world.js';
 
 const mirror = (v, side) => (side === 'L' ? [-v[0], v[1], v[2]] : v);
@@ -90,7 +90,8 @@ export function buildSubway(world) {
   water.rotation.x = -Math.PI / 2;
   g.add(ballast, girder, water);
   // windows: one long glass strip behind wall panels
-  const glassMat = new THREE.MeshBasicMaterial({ map: scrollTex('day'), toneMapped: false });
+  // the city outside is painted from the real time of day (sky.js); it scrolls past
+  const glassMat = new THREE.MeshBasicMaterial({ map: world.painter.texture('strip'), toneMapped: false });
   const glass = plane(16, 1.9, glassMat, 0, 3.55, -2.05);
   g.add(glass);
   g.add(
@@ -207,11 +208,8 @@ export function buildSubway(world) {
       else routine.start('phone');
       speed = 1;
     },
-    mood(m) {
-      glassMat.map = scrollTex(m);
-      glassMat.map.repeat.set(1.3, 1);
-      glassMat.needsUpdate = true;
-      waterMat.color.set({ morning: '#86c6dc', day: '#6fb6d3', dusk: '#a07aa6', night: '#2a3466' }[m] || '#6fb6d3');
+    sky(s) {
+      waterMat.color.set(s.outside.water);
     },
     update(dt, t, ctx, w) {
       routine.update(dt, t);

@@ -6,7 +6,7 @@
  *   table  sitting on a floor cushion, legs stretched out under a blanket-covered low table
  *   bed    asleep on its side, facing us, knees drawn up under a puffy duvet
  */
-import { THREE, mat, box, cyl, ball, plane, group, shade, windowTex, canvasTex, glow, zzz } from './kit.js';
+import { THREE, mat, box, cyl, ball, plane, group, shade, canvasTex, glow, zzz, wallClock, sunPatch } from './kit.js';
 import { Routine } from './world.js';
 
 const TABLE_X = -0.6;
@@ -99,7 +99,8 @@ export function buildHome(world) {
   g.add(plane(32, 16, mat('#f8ead6'), 0, 8, -2.05), plane(32, 1.3, mat('#ead2b2'), 0, 0.65, -2.03), box(32, 0.1, 0.08, mat('#d1b08a'), 0, 1.32, -2.0, 0.02));
 
   // window with curtains
-  const glassMat = new THREE.MeshBasicMaterial({ map: windowTex('home', 'day'), toneMapped: false });
+  // the view outside is painted from the real time of day (sky.js)
+  const glassMat = new THREE.MeshBasicMaterial({ map: world.painter.texture('home'), toneMapped: false });
   const win = group(
     plane(2.1, 1.9, glassMat),
     box(2.3, 0.13, 0.12, mat('#ffffff'), 0, 1.0, 0.03, 0.04),
@@ -121,6 +122,13 @@ export function buildHome(world) {
   shelf.add(cyl(0.16, 0.13, 0.26, mat('#fffaf0'), 0.6, 0.18, 0), ball(0.24, mat('#6fb27a'), 0.6, 0.45, 0));
   shelf.position.set(-2.0, 3.4, -1.8);
   g.add(shelf);
+
+  // a clock on the wall (real time) and sunlight through the window
+  const clock = wallClock();
+  clock.group.scale.setScalar(0.85);
+  clock.group.position.set(-0.45, 4.15, -2.0);
+  const patch = sunPatch(2.0, 1.5);
+  g.add(clock.group, patch);
 
   // rug, cushion, low table with a blanket (kotatsu style)
   const rug = cyl(2.0, 2.0, 0.02, mat('#f3d9b6'), TABLE_X, 0.01, 0.45, 40);
@@ -344,16 +352,17 @@ export function buildHome(world) {
     enter(ctx, w) {
       place(w, ctx.spot || 'table');
     },
-    mood(m) {
-      glassMat.map = windowTex('home', m);
-      glassMat.needsUpdate = true;
-      const dark = m === 'night' ? 1 : m === 'dusk' ? 0.55 : 0;
+    sky(s) {
+      // the lamp comes on gradually as it gets dark
+      const dark = s.dark;
+      patch.userData.update(s, 1.45, -2.0);
       lampLight.intensity = dark * 7;
       shadeMat.emissiveIntensity = dark * 0.9;
       lampGlow.material.opacity = dark * 0.8;
       tvScreen.emissiveIntensity = 0.25 + dark * 0.35;
     },
     update(dt, t, ctx, w) {
+      clock.set(new Date(ctx.now ? ctx.now() : Date.now()));
       const want = ctx.spot || 'table';
       if (want !== spot) place(w, want);
       const r = routines[spot];

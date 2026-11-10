@@ -313,7 +313,9 @@ function openReceipt() {
 /* ============================================================== flow */
 async function ride(dir) {
   setMode('ride');
-  el.ledText.textContent = dir === 'in' ? '이번 역은 직장의숲, 직장의숲 역입니다 · 내리실 문은 오른쪽입니다' : '이번 역은 우리집, 우리집 역입니다 · 오늘도 수고하셨습니다';
+  const clockNow = C.hm(now());
+  el.ledText.textContent =
+    dir === 'in' ? `${clockNow} · 이번 역은 직장의숲, 직장의숲 역입니다 · 내리실 문은 오른쪽입니다` : `${clockNow} · 이번 역은 우리집, 우리집 역입니다 · 오늘도 수고하셨습니다`;
   sfx.whoosh();
   await iris(false);
   world.show('subway', { dir, ride: 0 });
@@ -406,8 +408,8 @@ function tick(quiet) {
       openReceipt();
     }
   }
-  const mood = C.moodAt(t);
-  if (world && mood !== world.mood) world.setMood(mood);
+  // the sky, the window views and the room light follow the real clock
+  if (world) world.setTime(t);
   const ctx = world.ctx;
   ctx.now = now;
   ctx.todayAcorns = C.today(data, t);
@@ -523,7 +525,7 @@ async function start() {
   await world.setLook(look);
 
   if (C.settle(data, now())) save();
-  world.setMood(C.moodAt(now()));
+  world.setTime(now());
   tick(true);
   enter(data.session ? 'office' : 'home');
   setInterval(tick, 250);

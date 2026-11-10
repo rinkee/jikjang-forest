@@ -1,7 +1,9 @@
 /*
  * 직장의 숲 · 하루 — world.js (one renderer, the character, and the scene sets around it)
  *
- * A set is { group, frame(aspect, ctx), enter(ctx), update(dt, t, ctx), mood?(m) }.
+ * A set is { group, frame(aspect, ctx), enter(ctx), update(dt, t, ctx), sky?(s) }.
+ * The time of day comes from setTime(ms) (the real clock): it lights the room and repaints
+ * the views out of the windows (world.painter), then hands the sky state (sky.js) to the set.
  * frame() returns { target: [x, y, z], w, h, elev } — the world width/height that must stay
  * on screen; the camera backs off until both fit, and eases when the frame changes.
  * Sets get their frame from world.view(key), which reads the camera tuning (js/tuning.js).
@@ -9,15 +11,9 @@
 import * as THREE from 'three';
 import { Character, makeScene, makeRenderer } from '../char3d.js';
 import { TUNING } from '../tuning.js';
+import { skyAt, sunTimes, SkyPainter } from './sky.js';
 
 const DEG = Math.PI / 180;
-
-const MOOD_LIGHT = {
-  morning: { hemi: [0xfff6ea, 0xcdbda6, 0.72], key: [0xfff1dc, 2.1], fill: 0.38, rim: 1.2, env: 0.55 },
-  day: { hemi: [0xfff4e6, 0xc9b8a0, 0.66], key: [0xfff0dc, 2.2], fill: 0.35, rim: 1.3, env: 0.55 },
-  dusk: { hemi: [0xffdcc2, 0xb89a90, 0.56], key: [0xffc28e, 1.85], fill: 0.3, rim: 1.4, env: 0.48 },
-  night: { hemi: [0xc4ccf2, 0x8a7f90, 0.42], key: [0xffd7a4, 1.55], fill: 0.22, rim: 0.9, env: 0.36 },
-};
 
 export class World {
   constructor(container, o) {
@@ -54,6 +50,9 @@ export class World {
     this.active = null;
     this.activeName = null;
     this.mood = 'day';
+    this.painter = new SkyPainter();
+    this.timeMs = Date.now();
+    this.sky = null;
     this.ctx = {}; // shared info for sets (now, today acorns, ...)
     this._cam = null; // eased frame
     this._status = '';
@@ -100,14 +99,17 @@ export class World {
     this.character.anim.yaw = 0;
     Object.assign(this.ctx, ctx || {});
     set.enter(this.ctx, this);
-    this.setMood(this.mood); // resets the lights (a set may have changed them) and tells the set
+    this.setTime(this.timeMs); // relights for the new set and hands it the sky
     this._cam = null; // jump, don't ease, into a new set
   }
 
-  setMood(m) {
-    if (!MOOD_LIGHT[m]) return;
-    this.mood = m;
-    const L = MOOD_LIGHT[m];
+  /** the time of day (ms since epoch, local clock): sky, window views, room light */
+  setTime(ms) {
+    this.timeMs = ms;
+    const s = skyAt(ms);
+    this.sky = s;
+    this.mood = s.mood;
+    const L = s.light;
     const { hemi, key, fill, rim } = this.lights;
     hemi.color.setHex(L.hemi[0]);
     hemi.groundColor.setHex(L.hemi[1]);
@@ -117,7 +119,17 @@ export class World {
     fill.intensity = L.fill;
     rim.intensity = L.rim;
     this.scene.environmentIntensity = L.env;
-    if (this.active && this.active.mood) this.active.mood(m);
+    this.painter.paint(s, this.t);
+    if (this.active && this.active.sky) this.active.sky(s);
+  }
+
+  /** a typical moment of today for 'morning' | 'day' | 'dusk' | 'night' (dev pages) */
+  setMood(m) {
+    const d = new Date(this.timeMs);
+    const st = sunTimes(d.getTime());
+    const at = (h) => new Date(d.getFullYear(), d.getMonth(), d.getDate(), Math.floor(h), Math.round((h % 1) * 60)).getTime();
+    const t = { morning: (st.rise || at(7)) + 50 * 60e3, day: at(13), dusk: (st.set || at(18)) + 4 * 60e3, night: at(22) }[m];
+    if (t) this.setTime(t);
   }
 
   /** move the shadow-casting lights so their shadow box follows the action */
@@ -214,6 +226,7 @@ export class World {
     const dt = Math.min(0.05, this.clock.getDelta());
     this.t += dt;
     if (this.active) this.active.update(dt, this.t, this.ctx, this);
+    if (this.sky) this.painter.paint(this.sky, this.t); // clouds drift
     this.character.tick(dt);
     this._frame(dt);
     this.renderer.render(this.scene, this.camera);
