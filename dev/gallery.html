@@ -1,0 +1,145 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>LOADING</title>
+<style>
+  body { font-family: -apple-system, system-ui, sans-serif; background: #f6f1e3; margin: 14px; color: #3b2416; }
+  h1 { font-size: 16px; margin: 0 0 6px; }
+  h2 { font-size: 15px; margin: 16px 0 8px; }
+  .grid { display: flex; flex-wrap: wrap; gap: 10px; }
+  .tile { background: #fff; border-radius: 12px; padding: 6px; text-align: center; font-size: 12px; box-shadow: 0 1px 0 #e3d9bf; }
+  .tile img, .tile .svg { display: block; border-radius: 8px; background: linear-gradient(#e8f3ff, #eaf6e2); }
+  .tile .svg svg { width: 100%; height: 100%; display: block; }
+  .row { display: flex; gap: 6px; justify-content: center; }
+  .label { margin-top: 4px; line-height: 1.3; max-width: 300px; }
+  .label code { color: #8a6a50; }
+  #errors { color: #b00; font-weight: bold; white-space: pre-wrap; font-size: 12px; }
+</style>
+<script type="importmap">
+{ "imports": { "three": "../vendor/three/three.module.js", "three/addons/": "../vendor/three/addons/" } }
+</script>
+</head>
+<body>
+<h1>3D Parts Gallery</h1>
+<div id="info"></div>
+<div id="errors"></div>
+<div id="out"></div>
+<script type="module">
+/*
+ * Query params:
+ *   ?cat=hair              categories (comma list). Each option is shown as
+ *                          [category thumbnail] + [extra views] (see views=)
+ *   &views=thumb,full,back,side,face,portrait   which renders per option (default: thumb,full)
+ *                          thumb = the UI thumbnail (cat.frame), full = whole body front,
+ *                          back = full from behind, side = full 3/4 left, portrait = bust
+ *                          zoom / turn / profile = head close-up from the front, 3/4, side
+ *   &size=200              render size (px) of each view
+ *   &colors=1              repeat each option in 4 palette colors of the category
+ *   &skins=1               repeat each option on 4 skin tones
+ *   &only=id1,id2          only these option ids
+ *   &random=12&seed=7      grid of random characters (full + portrait)
+ *   &set=key:value,...     override the base state (e.g. set=hair:bob,hat:none)
+ * Title becomes READY or ERRORS(n) when finished.
+ */
+import { CC } from '../js/cc.js';
+import { Thumbnailer, FRAMES } from '../js/char3d.js';
+const errors = [];
+const onError = (cat, id, err) => errors.push(`ERROR ${cat}/${id}: ${(err && err.stack) || err}`);
+window.addEventListener('error', (e) => errors.push('WINDOW ERROR: ' + e.message));
+window.addEventListener('unhandledrejection', (e) => errors.push('REJECTION: ' + (e.reason && e.reason.stack || e.reason)));
+
+const files = ['hair', 'face', 'clothes', 'extras'];
+for (const f of files) {
+  try { await import(`../js/parts/${f}.js`); }
+  catch (e) { if (!/Failed to fetch|404|Importing a module script failed/.test(String(e))) errors.push(`LOAD ${f}.js: ${e.stack || e}`); }
+}
+
+const q = new URLSearchParams(location.search);
+const size = +q.get('size') || 200;
+const views = (q.get('views') || 'thumb,full').split(',');
+const out = document.getElementById('out');
+const th = new Thumbnailer({ shadowSize: 1024 });
+
+const base = CC.defaultState();
+(q.get('set') || '').split(',').filter(Boolean).forEach((kv) => { const [k, v] = kv.split(':'); base[k] = v; });
+document.getElementById('info').textContent = CC.CATEGORIES.map((c) => `${c.key}:${c.paletteOnly ? c.palette.length + 'c' : (CC.parts[c.key] || []).length}`).join('  ·  ');
+
+function section(title) {
+  const h = document.createElement('h2'); h.textContent = title; out.appendChild(h);
+  const g = document.createElement('div'); g.className = 'grid'; out.appendChild(g); return g;
+}
+async function view(state, catKey, v) {
+  const cat = catKey && CC.category(catKey);
+  if (v === 'thumb' && cat) {
+    const value = cat.paletteOnly ? state[cat.colorKey] : state[catKey];
+    const r = await th.option(state, catKey, value, { size, onError });
+    if (r.type === 'svg') { const d = document.createElement('div'); d.className = 'svg'; d.style.width = d.style.height = size + 'px'; d.innerHTML = r.svg; return d; }
+    const img = new Image(size, size); img.src = r.src; return img;
+  }
+  const map = { full: ['full', 0], back: ['full', Math.PI], side: ['full', -0.7], portrait: ['portrait', 0], face: ['face', 0], zoom: ['faceZoom', 0], turn: ['faceZoom', -0.75], profile: ['faceZoom', -Math.PI / 2] };
+  const [frame, rotY] = map[v] || [v, 0];
+  const h = frame === 'full' ? Math.round(size * 1.3) : size;
+  const src = await th.render(state, { frame, width: size, height: h, rotY, onError, background: false });
+  const img = new Image(size, h); img.src = src; return img;
+}
+async function tile(grid, state, label, catKey) {
+  const t = document.createElement('div'); t.className = 'tile';
+  const row = document.createElement('div'); row.className = 'row'; t.appendChild(row);
+  for (const v of views) row.appendChild(await view(state, catKey, v));
+  const l = document.createElement('div'); l.className = 'label'; l.innerHTML = label; t.appendChild(l);
+  grid.appendChild(t);
+}
+
+try {
+  if (q.get('random')) {
+    const n = +q.get('random') || 12;
+    const rng = CC.rng(+q.get('seed') || 1);
+    const g = section(`random x${n}`);
+    for (let i = 0; i < n; i++) {
+      const s = CC.randomState(rng);
+      const t = document.createElement('div'); t.className = 'tile';
+      const row = document.createElement('div'); row.className = 'row'; t.appendChild(row);
+      row.appendChild(await view(s, null, 'full'));
+      row.appendChild(await view(s, null, 'side'));
+      const l = document.createElement('div'); l.className = 'label';
+      l.innerHTML = `#${i} ${s.hair}/${s.eyes}/${s.top}/${s.bottom}/${s.shoes}/${s.hat}/${s.glasses}/${s.acc}`;
+      t.appendChild(l); g.appendChild(t);
+    }
+  } else {
+    const cats = q.get('cat') ? q.get('cat').split(',') : CC.CATEGORIES.map((c) => c.key);
+    const only = q.get('only') ? q.get('only').split(',') : null;
+    for (const key of cats) {
+      const cat = CC.category(key);
+      if (!cat) continue;
+      if (cat.paletteOnly) {
+        const g = section(`${cat.label} (${key})`);
+        for (const col of cat.palette) await tile(g, Object.assign({}, base, { [cat.colorKey]: col }), `<code>${col}</code>`, key);
+        continue;
+      }
+      const list = (CC.parts[key] || []).filter((p) => !only || only.includes(p.id));
+      const g = section(`${cat.label} (${key}) — ${list.length}`);
+      for (const p of list) {
+        const variants = [];
+        if (q.get('colors') === '1' && cat.colorKey) {
+          const pal = cat.palette;
+          [0, Math.floor(pal.length / 3), Math.floor((2 * pal.length) / 3), pal.length - 1].forEach((i) => variants.push({ [cat.colorKey]: pal[i], _l: pal[i] }));
+        } else if (q.get('skins') === '1') {
+          [0, 3, 5, 7].forEach((i) => variants.push({ skin: CC.PALETTES.skin[i], _l: CC.PALETTES.skin[i] }));
+        } else variants.push({});
+        for (const v of variants) {
+          const s = Object.assign({}, base, v, { [key]: p.id });
+          delete s._l;
+          await tile(g, s, `${p.name} <code>${p.id}</code>${v._l ? ' ' + v._l : ''}`, key);
+        }
+      }
+    }
+  }
+} catch (e) {
+  errors.push('GALLERY: ' + (e.stack || e));
+}
+document.getElementById('errors').textContent = errors.join('\n');
+document.title = errors.length ? `ERRORS(${errors.length})` : 'READY';
+</script>
+</body>
+</html>

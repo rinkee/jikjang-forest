@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>직장의 숲 · 스튜디오</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Jua&display=swap">
+<script type="importmap">{ "imports": { "three": "../vendor/three/three.module.js", "three/addons/": "../vendor/three/addons/" } }</script>
+<style>
+  :root {
+    --bg: #f3ecdc; --panel: #fffaf0; --line: #e4d4b0; --ink: #4a3323; --ink-2: #7a5d45; --ink-3: #a68b70;
+    --green: #5bb36a; --green-d: #2f6e3c; --warm: #e8975a; --warm-d: #b8683a; --blue: #5aa9e6;
+    --font: 'Jua', 'Apple SD Gothic Neo', 'Malgun Gothic', system-ui, sans-serif;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--ink); font-family: var(--font); }
+  button, select, input { font: inherit; color: inherit; }
+  .app { display: grid; grid-template-columns: 300px auto 1fr; grid-template-rows: auto 1fr; height: 100vh; gap: 12px; padding: 12px; }
+  header { grid-column: 1 / -1; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+  header h1 { margin: 0 8px 0 0; font-size: 22px; font-weight: normal; }
+  .badge { padding: 4px 10px; border-radius: 99px; font-size: 13px; background: #e7f4e5; color: var(--green-d); }
+  .badge.dirty { background: #ffe9d6; color: var(--warm-d); }
+  .spacer { flex: 1; }
+  .btn { border: 0; border-radius: 12px; padding: 8px 14px; background: var(--panel); box-shadow: 0 3px 0 var(--line); cursor: pointer; font-size: 15px; }
+  .btn:active { transform: translateY(2px); box-shadow: 0 1px 0 var(--line); }
+  .btn.green { background: var(--green); color: #fff; box-shadow: 0 3px 0 var(--green-d); }
+  .btn.warm { background: var(--warm); color: #fff; box-shadow: 0 3px 0 var(--warm-d); }
+
+  .controls { overflow: auto; padding-right: 4px; }
+  .group { background: var(--panel); border: 2px solid var(--line); border-radius: 16px; padding: 12px 14px; margin-bottom: 10px; }
+  .group h2 { margin: 0 0 8px; font-size: 16px; font-weight: normal; color: var(--ink-2); display: flex; justify-content: space-between; align-items: center; }
+  .group h2 small { font-size: 12px; color: var(--ink-3); }
+  .row { display: grid; grid-template-columns: 1fr 64px; gap: 4px 8px; align-items: center; margin: 6px 0; font-size: 14px; }
+  .row label { grid-column: 1 / -1; display: flex; justify-content: space-between; color: var(--ink-2); }
+  .row input[type=range] { width: 100%; accent-color: var(--green); }
+  .row input[type=number] { width: 64px; padding: 2px 4px; border: 1px solid var(--line); border-radius: 6px; background: #fff; font-size: 13px; }
+  .row .reset { font-size: 11px; color: var(--ink-3); cursor: pointer; }
+  .pick { display: flex; gap: 6px; align-items: center; margin: 6px 0; font-size: 14px; }
+  .pick select { flex: 1; padding: 4px 6px; border-radius: 8px; border: 1px solid var(--line); background: #fff; }
+  .ratio { margin-top: 8px; padding: 8px 10px; background: #f6efe0; border-radius: 10px; font-size: 14px; line-height: 1.6; }
+  .ratio b { font-weight: normal; color: var(--warm-d); font-size: 16px; }
+  .hint { font-size: 12px; color: var(--ink-3); margin: 4px 0 0; line-height: 1.5; }
+
+  .phone-col { display: flex; flex-direction: column; align-items: center; gap: 8px; }
+  .phone { position: relative; border-radius: 26px; overflow: hidden; background: #f4ecd8; box-shadow: 0 0 0 8px #3a2c22, 0 14px 30px rgba(0,0,0,0.25); }
+  .phone .world { position: absolute; inset: 0; }
+  .phone .world canvas { display: block; width: 100%; height: 100%; }
+  .hud { position: absolute; inset: 0; pointer-events: none; }
+  .hud .card { position: absolute; left: 4%; right: 4%; border-radius: 14px; background: rgba(255,250,240,0.92); border: 1px solid var(--line); }
+  .hud .who { position: absolute; left: 4%; width: 40%; border-radius: 99px; background: rgba(255,250,240,0.9); }
+  .hud .go { position: absolute; left: 4%; right: 4%; border-radius: 14px; background: rgba(91,179,106,0.92); }
+  .hud .band { position: absolute; left: 0; right: 0; border-top: 1px dashed rgba(229,88,79,0.6); border-bottom: 1px dashed rgba(229,88,79,0.6); }
+  .cap { font-size: 13px; color: var(--ink-2); }
+
+  .views { display: grid; grid-template-rows: auto 1fr; gap: 12px; min-width: 0; min-height: 0; }
+  .panel { position: relative; background: var(--panel); border: 2px solid var(--line); border-radius: 16px; overflow: hidden; min-height: 0; }
+  .panel > .title { position: absolute; left: 10px; top: 8px; font-size: 14px; color: var(--ink-2); z-index: 2; background: rgba(255,250,240,0.85); padding: 2px 8px; border-radius: 99px; }
+  .turn { height: 340px; }
+  .turn canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
+  .turn .grid { background-image: linear-gradient(rgba(122,93,69,0.08) 1px, transparent 1px), linear-gradient(90deg, rgba(122,93,69,0.08) 1px, transparent 1px); background-size: 20px 20px; position: absolute; inset: 0; }
+  .orbit canvas { position: absolute; inset: 0; width: 100%; height: 100%; cursor: grab; }
+  .orbit .help { position: absolute; right: 10px; bottom: 8px; font-size: 12px; color: var(--ink-3); background: rgba(255,250,240,0.85); padding: 2px 8px; border-radius: 99px; }
+
+  .modal { position: fixed; inset: 0; background: rgba(43,29,20,0.45); display: flex; align-items: center; justify-content: center; z-index: 10; }
+  .modal > div { width: min(560px, 92vw); background: var(--panel); border-radius: 18px; padding: 18px; }
+  .modal pre { background: #f6efe0; padding: 10px; border-radius: 10px; max-height: 300px; overflow: auto; font-size: 12px; user-select: all; }
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+<div class="app">
+  <header>
+    <h1>🛠️ 직장의 숲 스튜디오</h1>
+    <span class="badge" id="badge">저장된 값</span>
+    <span class="spacer"></span>
+    <button class="btn" id="btnRevert" title="js/tuning.js에 저장된 값으로 되돌려요">↺ 저장된 값으로</button>
+    <button class="btn" id="btnApp" title="이 브라우저에서, 저장 전 값으로 출퇴근 화면을 열어요">📱 앱에서 보기</button>
+    <button class="btn" id="btnWorkshop" title="이 브라우저에서, 저장 전 값으로 공방을 열어요">🎨 공방에서 보기</button>
+    <button class="btn green" id="btnSave" title="js/tuning.js 파일에 저장해요 (모든 기기에 적용)">💾 코드에 저장</button>
+  </header>
+
+  <aside class="controls" id="controls"></aside>
+
+  <section class="phone-col">
+    <div class="phone" id="phone">
+      <div class="world" id="world"></div>
+      <div class="hud" id="hud">
+        <div class="who"></div><div class="card"></div><div class="go"></div><div class="band"></div>
+      </div>
+    </div>
+    <div class="cap" id="phoneCap">폰 화면 (카메라로 본 모습)</div>
+  </section>
+
+  <section class="views">
+    <div class="panel turn" id="turn">
+      <div class="grid"></div>
+      <span class="title">캐릭터 · 정면 / 왼쪽 / 뒷면 / 오른쪽</span>
+    </div>
+    <div class="panel orbit" id="orbit">
+      <span class="title">장소 둘러보기 · 노란 선이 카메라예요</span>
+      <span class="help">드래그: 돌리기 · 휠: 확대/축소 · Shift+드래그: 옮기기</span>
+    </div>
+  </section>
+</div>
+
+<div class="modal" id="saveModal" hidden>
+  <div>
+    <h2 style="margin:0 0 8px;font-weight:normal">코드에 바로 저장할 수 없어요</h2>
+    <p style="margin:0 0 10px;color:var(--ink-2);line-height:1.6">스튜디오 서버로 열면 버튼 한 번에 <code>js/tuning.js</code>에 저장돼요.<br>터미널에서 <code>node tools/studio.mjs</code>를 실행하고 <code>http://localhost:5180/dev/studio.html</code>을 여세요.<br>아니면 아래 값을 복사해서 Claude에게 "이 값으로 적용해줘"라고 보내도 돼요.</p>
+    <pre id="saveJson"></pre>
+    <div style="display:flex;gap:8px;justify-content:flex-end"><button class="btn" id="btnCopy">값 복사</button><button class="btn green" id="btnCloseModal">닫기</button></div>
+  </div>
+</div>
+
+<script type="module" src="./studio.js"></script>
+</body>
+</html>

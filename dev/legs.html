@@ -1,0 +1,60 @@
+<!doctype html><html lang="ko"><head><meta charset="utf-8"><title>LOADING</title>
+<style>body{margin:0;background:#fbf5e6;font:12px system-ui} #out{display:grid;grid-template-columns:repeat(var(--cols,4),220px);gap:6px;padding:8px} .t{width:220px} .st{position:relative;width:220px;height:260px;border-radius:12px;overflow:hidden;background:linear-gradient(#cdeeff,#eaf7df)} pre{color:#b00;margin:8px}</style>
+<script type="importmap">{ "imports": { "three": "../vendor/three/three.module.js", "three/addons/": "../vendor/three/addons/" } }</script>
+</head><body><div id="out"></div><pre id="errors"></pre>
+<script type="module">
+/* Dev page: leg poses for every option of a category.
+ *   ?cat=bottom|shoes|top  &poses=stand,sit,walk,kick,lie  &rot=0.6  &seed=N  &set=k:v,k:v  &frame=figure
+ * One row per option, one tile per pose. */
+import { CC } from '../js/cc.js';
+import { Stage } from '../js/char3d.js';
+const errors = [];
+window.addEventListener('error', (e) => errors.push(String(e.message)));
+window.addEventListener('unhandledrejection', (e) => errors.push(String(e.reason && e.reason.stack || e.reason)));
+for (const f of ['hair','face','clothes','extras']) { try { await import(`../js/parts/${f}.js`); } catch (e) { errors.push(f + ': ' + e); } }
+const q = new URLSearchParams(location.search);
+const cat = q.get('cat') || 'bottom';
+const POSES = {
+  stand: null,
+  sit: () => ({ hip: [-1.5, 0, 0], knee: 1.5, ankle: 0 }),
+  walk: (side) => (side === 'L' ? { hip: [-0.5, 0, 0], knee: 0.35, ankle: 0 } : { hip: [0.35, 0, 0], knee: 0.55, ankle: 0.3 }),
+  kick: () => ({ hip: [-1.45, 0, 0], knee: 0.4, ankle: 0 }),
+  cross: (side) => ({ hip: [-1.3, side === 'L' ? -0.5 : 0.5, side === 'L' ? -0.6 : 0.6], knee: 2.4, ankle: 0 }),
+};
+const poses = (q.get('poses') || 'stand,sit,walk,kick').split(',');
+document.getElementById('out').style.setProperty('--cols', poses.length);
+const rot = +(q.get('rot') ?? 0.7);
+const base = q.get('seed') ? CC.randomState(CC.rng(+q.get('seed'))) : CC.defaultState();
+(q.get('set') || '').split(',').filter(Boolean).forEach((kv) => { const [k, v] = kv.split(':'); base[k] = v; });
+const ids = q.get('ids') ? q.get('ids').split(',') : (CC.parts[cat] || []).map((p) => p.id);
+const out = document.getElementById('out');
+try {
+  for (const id of ids) for (const pose of poses) {
+    const state = Object.assign({}, base, { [cat]: id });
+    const t = document.createElement('div'); t.className = 't';
+    const box = document.createElement('div'); box.className = 'st'; t.appendChild(box);
+    const l = document.createElement('div'); l.textContent = `${cat}=${id} · ${pose}`; t.appendChild(l);
+    out.appendChild(t);
+    const st = new Stage(box, { interactive: false });
+    cancelAnimationFrame(st._raf);
+    await st.setState(state, { onError: (c, pid, e) => errors.push(`${c}/${pid}: ${e.stack || e}`) });
+    st.frame = q.get('frame') || 'figure'; st._applyFrame(1);
+    const ch = st.character;
+    ch.anim.yaw = rot;
+    const fn = POSES[pose];
+    ch.pose = fn ? { leg: fn } : null;
+    for (let i = 0; i < 90; i++) ch.tick(1 / 60);
+    if (pose === 'sit' || pose === 'kick' || pose === 'cross') ch.root.position.y = 0.45; // as if on a seat
+    st._lift = ch.lift; st._applyFrame(1);
+    st.renderer.render(st.scene, st.camera);
+    const img = new Image();
+    img.src = st.canvas.toDataURL();
+    Object.assign(img.style, { position: 'absolute', inset: '0', width: '100%', height: '100%' });
+    st.dispose();
+    box.appendChild(img);
+    await new Promise((r) => setTimeout(r, 10));
+  }
+} catch (e) { errors.push(String(e.stack || e)); }
+document.getElementById('errors').textContent = errors.join('\n');
+document.title = errors.length ? `ERRORS(${errors.length})` : 'READY';
+</script></body></html>

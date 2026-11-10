@@ -1,0 +1,17 @@
+<!doctype html><html lang="ko"><head><meta charset="utf-8"><title>LOADING</title>
+<style>body{margin:0;background:#fbf5e6;font-family:system-ui} #st{width:520px;height:640px;margin:10px;border-radius:24px;overflow:hidden;background:linear-gradient(#cdeeff,#eaf7df)} </style>
+<script type="importmap">{ "imports": { "three": "../vendor/three/three.module.js", "three/addons/": "../vendor/three/addons/" } }</script>
+</head><body><div id="st"></div>
+<script type="module">
+/* Dev page: live Stage. ?seed=N random state, ?frame=<FRAMES key>, ?state=<encoded> */
+import { CC } from '../js/cc.js';
+import { Stage } from '../js/char3d.js';
+for (const f of ['hair','face','clothes','extras']) { try { await import(`../js/parts/${f}.js`); } catch (e) {} }
+const q = new URLSearchParams(location.search);
+const st = new Stage(document.getElementById('st'));
+let s = q.get('state') ? CC.decodeState(q.get('state')) : q.get('seed') ? CC.randomState(CC.rng(+q.get('seed'))) : CC.defaultState();
+await st.setState(s);
+if (q.get('frame')) st.setFrame(q.get('frame'));
+window.stage = st;
+setTimeout(() => (document.title = 'READY'), 1200);
+</script></body></html>

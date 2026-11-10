@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>직장의 숲 · 하루</title>
+<meta name="description" content="직장의 숲 — 내가 일하면 같이 일하고, 내가 쉬면 같이 쉬는 내 분신">
+<meta name="theme-color" content="#fbf5e6">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="직장의 숲">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Cellipse cx='32' cy='40' rx='19' ry='21' fill='%23e8975a'/%3E%3Cpath d='M10 30C10 14 22 6 32 6s22 8 22 24c-7 4-15 4-22 1-7 3-15 3-22-1z' fill='%238a5630'/%3E%3Cpath d='M32 7c0-4 2-6 6-6' stroke='%236c3f20' stroke-width='4' fill='none' stroke-linecap='round'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Jua&display=swap">
+<link rel="stylesheet" href="css/day.css">
+<script type="importmap">
+{ "imports": { "three": "./vendor/three/three.module.js", "three/addons/": "./vendor/three/addons/" } }
+</script>
+<script>
+  /* ?test=1: errors -> title "ERR: ..." (screenshot tool), "READY" when the first scene is up */
+  (function () {
+    var TEST = new URLSearchParams(location.search).get('test') === '1';
+    window.__day = { test: TEST, errors: [] };
+    function report(msg) {
+      msg = String(msg || 'unknown error');
+      if (/ResizeObserver loop/.test(msg)) return;
+      window.__day.errors.push(msg);
+      if (TEST) document.title = 'ERR: ' + msg.slice(0, 120);
+    }
+    window.addEventListener('error', function (e) {
+      if (e && e.target && e.target !== window && (e.target.tagName === 'LINK' || e.target.tagName === 'IMG')) return;
+      report((e && (e.message || (e.error && e.error.message))) || 'script error');
+    });
+    window.addEventListener('unhandledrejection', function (e) {
+      var r = e && e.reason;
+      report('unhandled rejection: ' + ((r && (r.stack || r.message)) || r));
+    });
+  })();
+</script>
+</head>
+<body>
+<main class="day" id="day" data-mode="loading">
+  <div class="world" id="world" aria-hidden="true"></div>
+
+  <!-- top: who, acorns, time -->
+  <header class="hud" id="hud">
+    <div class="hud-top">
+      <div class="who" id="who"><span class="who-name" id="whoName">새내기</span><span class="who-sub" id="whoSub"></span></div>
+      <button type="button" class="icon-btn" id="btnSettings" aria-label="설정">⚙️</button>
+    </div>
+    <div class="card">
+      <div class="acorns">
+        <span class="acorns-lb" id="acornLb">오늘 받은 도토리</span>
+        <span class="acorns-n"><span class="acorn-ic" aria-hidden="true"></span><b id="acornN">0</b></span>
+      </div>
+      <div class="side">
+        <span class="side-lb" id="sideLb">모은 도토리</span>
+        <b class="side-v" id="sideV">0</b>
+      </div>
+      <div class="gauge" id="gauge" hidden>
+        <div class="gauge-bar"><i id="gaugeFill"></i></div>
+        <span class="gauge-lb" id="gaugeLb">다음 도토리까지</span>
+      </div>
+    </div>
+    <p class="status" id="status" aria-live="polite"></p>
+  </header>
+
+  <span class="plus" id="plus" aria-hidden="true">+1</span>
+
+  <!-- bottom: the one button -->
+  <footer class="bar" id="bar">
+    <p class="bar-note" id="barNote"></p>
+    <button type="button" class="go" id="btnGo"><span class="go-ic" id="goIc" aria-hidden="true">🚇</span><span id="goLb">출근하기</span></button>
+  </footer>
+
+  <!-- ride -->
+  <div class="ride" id="ride" hidden>
+    <div class="led" aria-live="polite"><span class="led-text" id="ledText">이번 역은 직장의숲, 직장의숲 역입니다</span></div>
+    <p class="ride-skip">화면을 누르면 건너뛰어요</p>
+  </div>
+
+  <div class="iris" id="iris" aria-hidden="true"></div>
+
+  <!-- sheets -->
+  <div class="sheet-wrap" id="sheetWrap" hidden>
+    <div class="sheet" id="sheet" role="dialog" aria-modal="true" aria-labelledby="sheetTitle"></div>
+  </div>
+
+  <div class="loading" id="loading">
+    <div class="loading-acorn" aria-hidden="true"></div>
+    <p id="loadingText">분신이 일어나는 중…</p>
+  </div>
+</main>
+<script type="module" src="js/day/app.js"></script>
+</body>
+</html>

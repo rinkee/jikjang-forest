@@ -1,0 +1,281 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>직장의 숲 · 불러오는 중…</title>
+<meta name="description" content="직장의 숲 · 캐릭터 공방 — 나만의 귀여운 3D 직장인 캐릭터를 꾸미고 사원증을 발급받아 보세요.">
+<meta name="theme-color" content="#fbf5e6">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Cellipse cx='32' cy='40' rx='19' ry='21' fill='%23e8975a'/%3E%3Cpath d='M10 30C10 14 22 6 32 6s22 8 22 24c-7 4-15 4-22 1-7 3-15 3-22-1z' fill='%238a5630'/%3E%3Cpath d='M32 7c0-4 2-6 6-6' stroke='%236c3f20' stroke-width='4' fill='none' stroke-linecap='round'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Jua&display=swap">
+<link rel="stylesheet" href="css/style.css">
+<script type="importmap">
+{ "imports": { "three": "./vendor/three/three.module.js", "three/addons/": "./vendor/three/addons/" } }
+</script>
+<script>
+  /* Runs before the module graph: debug error capture (?test=1) + early failure hint. */
+  (function () {
+    var q = new URLSearchParams(location.search);
+    var TEST = q.get('test') === '1';
+    window.__cc = { test: TEST, errors: [] };
+    function report(msg) {
+      msg = String(msg || 'unknown error');
+      if (/ResizeObserver loop/.test(msg)) return;
+      window.__cc.errors.push(msg);
+      if (!TEST) return;
+      document.title = 'ERR: ' + msg.slice(0, 120);
+      var show = function () {
+        var box = document.getElementById('errbox');
+        if (!box) return;
+        box.hidden = false;
+        box.textContent = window.__cc.errors.join('\n');
+      };
+      if (document.body) show();
+      else document.addEventListener('DOMContentLoaded', show);
+    }
+    window.__cc.report = report;
+    window.addEventListener('error', function (e) {
+      if (e && e.target && e.target !== window && (e.target.tagName === 'LINK' || e.target.tagName === 'IMG')) return;
+      report((e && (e.message || (e.error && e.error.message))) || 'script error');
+    });
+    window.addEventListener('unhandledrejection', function (e) {
+      var r = e && e.reason;
+      report('unhandled rejection: ' + ((r && (r.stack || r.message)) || r));
+    });
+  })();
+</script>
+</head>
+<body>
+<a class="skip" href="#editor">꾸미기 패널로 건너뛰기</a>
+
+<div class="app" id="app">
+  <!-- ============================================================ top bar -->
+  <header class="topbar">
+  <div class="brand">
+    <span class="brand-logo" id="brandLogo" aria-hidden="true"></span>
+    <div class="brand-text">
+      <b>직장의 숲</b>
+      <span>캐릭터 공방</span>
+    </div>
+  </div>
+
+  <nav class="toolbar" aria-label="도구 모음">
+    <button type="button" class="tool tool-dice" data-act="random" title="랜덤 변신 (R)"><span class="ic" aria-hidden="true">🎲</span><span class="lb">랜덤</span></button>
+    <button type="button" class="tool" data-act="undo" title="되돌리기 (Ctrl/⌘+Z)"><span class="ic ic-glyph" aria-hidden="true">↺</span><span class="lb">되돌리기</span></button>
+    <button type="button" class="tool" data-act="redo" title="다시하기 (Shift+Ctrl/⌘+Z)"><span class="ic ic-glyph" aria-hidden="true">↻</span><span class="lb">다시하기</span></button>
+    <button type="button" class="tool" data-act="reset" title="처음 모습으로"><span class="ic" aria-hidden="true">🌱</span><span class="lb">초기화</span></button>
+    <span class="tool-sep" aria-hidden="true"></span>
+    <button type="button" class="tool tool-green" data-act="save" title="도감에 저장"><span class="ic" aria-hidden="true">💾</span><span class="lb">도감에 저장</span></button>
+    <button type="button" class="tool" data-act="gallery" title="내 도감 열기"><span class="ic" aria-hidden="true">📖</span><span class="lb">내 도감</span><span class="badge" id="galleryCount" hidden>0</span></button>
+    <button type="button" class="tool" data-act="png" title="PNG 이미지로 저장"><span class="ic" aria-hidden="true">🖼️</span><span class="lb">PNG 저장</span></button>
+    <button type="button" class="tool" data-act="share" title="공유 링크 복사"><span class="ic" aria-hidden="true">🔗</span><span class="lb">공유 링크</span></button>
+    <button type="button" class="tool tool-sound" data-act="sound" title="소리 켜기/끄기" aria-pressed="true"><span class="ic" aria-hidden="true">🔊</span><span class="lb">소리</span></button>
+    <a class="tool tool-commute" href="day.html" title="이 캐릭터와 같이 출퇴근하기"><span class="ic" aria-hidden="true">🚇</span><span class="lb">출근하러 가기</span></a>
+  </nav>
+  </header>
+
+  <!-- ============================================================ stage -->
+  <section class="stage-col" aria-label="캐릭터 미리보기">
+    <div class="stage-card" id="stageCard">
+      <div class="stage-slot" id="stageSlot"></div>
+      <div class="sparkles" id="sparkles" aria-hidden="true"></div>
+      <div class="stage-leaf stage-leaf-l" aria-hidden="true"></div>
+      <div class="stage-leaf stage-leaf-r" aria-hidden="true"></div>
+      <div class="stage-anim" role="group" aria-label="동작">
+        <button type="button" class="chip-btn" data-anim="wave" title="인사하기"><span aria-hidden="true">👋</span><span class="sr">인사</span></button>
+        <button type="button" class="chip-btn" data-anim="hop" title="점프"><span aria-hidden="true">🐇</span><span class="sr">점프</span></button>
+        <button type="button" class="chip-btn" data-anim="spin" title="한 바퀴"><span aria-hidden="true">🌀</span><span class="sr">회전</span></button>
+      </div>
+      <div class="stage-quick" role="group" aria-label="빠른 도구">
+        <button type="button" class="chip-btn" data-act="undo" title="되돌리기"><span aria-hidden="true">↺</span><span class="sr">되돌리기</span></button>
+        <button type="button" class="chip-btn" data-act="redo" title="다시하기"><span aria-hidden="true">↻</span><span class="sr">다시하기</span></button>
+        <button type="button" class="chip-btn chip-dice" data-act="random" title="랜덤"><span aria-hidden="true">🎲</span><span class="sr">랜덤</span></button>
+      </div>
+      <div class="stage-hint" id="stageHint"><span aria-hidden="true">👆</span> 드래그해서 돌려보기</div>
+      <div class="stage-msg" id="stageMsg" hidden></div>
+    </div>
+
+    <form class="plate" id="plate" autocomplete="off" onsubmit="return false">
+      <div class="plate-nail plate-nail-l" aria-hidden="true"></div>
+      <div class="plate-nail plate-nail-r" aria-hidden="true"></div>
+      <label class="field field-name">
+        <span class="field-lb">이름</span>
+        <input id="inName" type="text" maxlength="12" placeholder="새내기" spellcheck="false" enterkeyhint="done">
+      </label>
+      <label class="field field-dept">
+        <span class="field-lb">부서</span>
+        <select id="inDept">
+          <option value="">선택</option>
+          <option>도토리 개발팀</option>
+          <option>버섯 마케팅팀</option>
+          <option>꿀벌 인사팀</option>
+          <option>나뭇잎 디자인팀</option>
+          <option>연못 재무팀</option>
+          <option>숲속 영업팀</option>
+          <option>다람쥐 기획팀</option>
+        </select>
+      </label>
+      <label class="field field-rank">
+        <span class="field-lb">직급</span>
+        <select id="inRank">
+          <option value="">선택</option>
+          <option>인턴</option>
+          <option>사원</option>
+          <option>주임</option>
+          <option>대리</option>
+          <option>과장</option>
+          <option>차장</option>
+          <option>부장</option>
+          <option>숲장</option>
+        </select>
+      </label>
+      <button type="button" class="btn btn-yellow btn-card" id="btnCard"><span aria-hidden="true">🪪</span> 사원증 발급!</button>
+    </form>
+  </section>
+
+  <!-- ============================================================ editor -->
+  <section class="editor" id="editor" aria-label="꾸미기">
+    <div class="tabs" id="tabs" role="tablist" aria-label="꾸미기 항목"></div>
+    <div class="editor-body" id="editorBody" role="tabpanel">
+      <div class="editor-head">
+        <h2 class="editor-title"><span class="editor-ic" id="edIcon" aria-hidden="true"></span><span id="edTitle">헤어</span></h2>
+        <span class="editor-count" id="edCount"></span>
+        <div class="editor-nav">
+          <button type="button" class="nav-btn" id="btnPrev" title="이전 옵션 (←)" aria-label="이전 옵션">◀</button>
+          <button type="button" class="nav-btn" id="btnNext" title="다음 옵션 (→)" aria-label="다음 옵션">▶</button>
+        </div>
+      </div>
+      <div class="palette" id="palette" role="radiogroup" aria-label="색상"></div>
+      <div class="grid-scroll" id="gridScroll">
+        <div class="opt-grid" id="grid" role="radiogroup"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============================================================ dialogue -->
+  <section class="dialog" id="dialog" aria-label="도토리 팀장의 말">
+    <div class="dialog-portrait" id="dlgPortrait" data-mood="happy"></div>
+    <div class="dialog-bubble" id="dlgBubble" role="button" tabindex="0" title="클릭하면 바로 넘어가요">
+      <span class="dialog-name">도토리 팀장</span>
+      <p class="dialog-text" id="dlgText" aria-live="polite"></p>
+      <span class="dialog-next" aria-hidden="true">▼</span>
+    </div>
+  </section>
+</div>
+
+<!-- ============================================================ intro -->
+<div class="intro" id="intro" role="dialog" aria-modal="true" aria-labelledby="introTitle">
+  <div class="intro-sky" aria-hidden="true">
+    <span class="cloud c1"></span><span class="cloud c2"></span><span class="cloud c3"></span>
+    <div class="intro-leaves" id="introLeaves"></div>
+    <svg class="intro-hills" viewBox="0 0 1440 260" preserveAspectRatio="none">
+      <path d="M0 150C180 90 320 120 470 150S760 210 930 160 1250 70 1440 130V260H0Z" fill="#9fd68c"/>
+      <path d="M0 200C220 150 420 190 640 205S1050 170 1250 185 1400 205 1440 200V260H0Z" fill="#7cc46f"/>
+    </svg>
+  </div>
+  <div class="intro-inner">
+    <h1 class="intro-title" id="introTitle" aria-label="직장의 숲">
+      <span class="tl" style="--i:0">직</span><span class="tl" style="--i:1">장</span><span class="tl" style="--i:2">의</span><span class="tl tl-gap" style="--i:3">숲</span>
+    </h1>
+    <div class="intro-sub"><span>캐릭터 공방</span></div>
+    <div class="intro-stage">
+      <div class="intro-npc">
+        <div class="intro-bubble" id="introBubble">어서 와요, 신입 사원님!<br>오늘의 출근룩을 함께 골라봐요~</div>
+        <div class="intro-mascot" id="introMascot" data-mood="happy"></div>
+      </div>
+      <div class="intro-window">
+        <div class="intro-preview" id="introPreview"></div>
+        <div class="intro-chip" id="introChip">✨ 오늘의 신입 후보</div>
+      </div>
+    </div>
+    <button type="button" class="btn-start" id="btnStart" disabled>
+      <span class="btn-start-lb">준비 중…</span>
+    </button>
+    <p class="intro-foot">Enter 키로도 시작할 수 있어요 · 소리가 함께 나와요 🔊</p>
+  </div>
+</div>
+
+<!-- ============================================================ ID card modal -->
+<div class="modal" id="cardModal" hidden>
+  <div class="modal-backdrop" data-close></div>
+  <div class="modal-box modal-card" role="dialog" aria-modal="true" aria-labelledby="cardTitle">
+    <button type="button" class="modal-x" data-close aria-label="닫기">✕</button>
+    <h2 class="modal-title" id="cardTitle"><span aria-hidden="true">🪪</span> 사원증 발급</h2>
+    <div class="idcard-wrap">
+      <div class="idcard" id="idcard">
+        <div class="idcard-hole" aria-hidden="true"></div>
+        <div class="idcard-head">
+          <span class="idcard-logo" id="cardLogo" aria-hidden="true"></span>
+          <span class="idcard-co">직장의 숲 주식회사</span>
+          <span class="idcard-tag">EMPLOYEE ID</span>
+        </div>
+        <div class="idcard-body">
+          <div class="idcard-photo loading" id="cardPhotoBox"><img id="cardPhoto" alt="사원증 사진"></div>
+          <div class="idcard-info">
+            <div class="idcard-name" id="cardName">새내기</div>
+            <dl class="idcard-dl">
+              <dt>부서</dt><dd id="cardDept">-</dd>
+              <dt>직급</dt><dd id="cardRank">-</dd>
+              <dt>사번</dt><dd id="cardNo">-</dd>
+              <dt>발급일</dt><dd id="cardDate">-</dd>
+            </dl>
+          </div>
+        </div>
+        <div class="idcard-foot">
+          <div class="barcode" id="cardBarcode" aria-hidden="true"></div>
+        </div>
+        <span class="idcard-motto">오늘도 숲처럼 푸르게 🌿</span>
+        <div class="stamp" id="cardStamp" aria-hidden="true"><span>발급<br>완료</span></div>
+      </div>
+    </div>
+    <div class="modal-actions">
+      <button type="button" class="btn btn-green" id="cardSave"><span aria-hidden="true">🖼️</span> 이미지로 저장</button>
+      <a class="btn btn-yellow" href="day.html"><span aria-hidden="true">🚇</span> 출근하러 가기</a>
+      <button type="button" class="btn btn-plain" data-close>닫기</button>
+    </div>
+  </div>
+</div>
+
+<!-- ============================================================ gallery modal -->
+<div class="modal" id="galleryModal" hidden>
+  <div class="modal-backdrop" data-close></div>
+  <div class="modal-box modal-gallery" role="dialog" aria-modal="true" aria-labelledby="galTitle">
+    <button type="button" class="modal-x" data-close aria-label="닫기">✕</button>
+    <h2 class="modal-title" id="galTitle"><span aria-hidden="true">📖</span> 내 도감 <small id="galCount">0 / 30</small></h2>
+    <p class="modal-note" id="galNote" hidden></p>
+    <div class="gal-grid" id="galGrid"></div>
+    <div class="gal-empty" id="galEmpty" hidden>
+      <div class="gal-empty-mascot" id="galEmptyMascot" data-mood="wink"></div>
+      <p>아직 저장된 캐릭터가 없어요.<br><b>💾 도감에 저장</b>을 눌러 첫 동료를 등록해봐요!</p>
+    </div>
+    <div class="modal-actions">
+      <button type="button" class="btn btn-green" id="galSaveNow"><span aria-hidden="true">💾</span> 지금 모습 저장</button>
+      <button type="button" class="btn btn-plain" data-close>닫기</button>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
+<div class="errbox" id="errbox" hidden></div>
+
+<script>
+  /* Opening index.html straight from disk can't load ES modules: explain how to serve it. */
+  if (location.protocol === 'file:') {
+    var ov = document.createElement('div');
+    ov.className = 'file-overlay';
+    ov.innerHTML =
+      '<div class="file-card">' +
+      '<div class="file-emoji">🌰</div>' +
+      '<h2>앗, 파일을 바로 열었네요!</h2>' +
+      '<p>3D 캐릭터 공방은 보안 정책 때문에 <b>로컬 서버</b>에서 열어야 해요.<br>프로젝트 폴더에서 터미널을 열고 아래 명령을 실행해 주세요.</p>' +
+      '<pre>python3 -m http.server 8000</pre>' +
+      '<p>그다음 브라우저에서 <a href="http://localhost:8000">http://localhost:8000</a> 을 열면 출근 완료! 🌿</p>' +
+      '</div>';
+    document.body.appendChild(ov);
+  }
+</script>
+<script type="module" src="js/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,8 @@
+# macOS
+.DS_Store
+._*
+# tools
+node_modules/
+*.log
+# personal Claude Code settings (the shared launch config stays)
+.claude/settings.local.json

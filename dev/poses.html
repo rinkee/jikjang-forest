@@ -1,0 +1,54 @@
+<!doctype html><html lang="ko"><head><meta charset="utf-8"><title>LOADING</title>
+<style>body{margin:0;background:#fbf5e6;font:12px system-ui} #out{display:flex;flex-wrap:wrap;gap:8px;padding:8px} .t{width:300px} .st{width:300px;height:380px;border-radius:14px;overflow:hidden;background:linear-gradient(#cdeeff,#eaf7df)} pre{color:#b00;margin:8px}</style>
+<script type="importmap">{ "imports": { "three": "../vendor/three/three.module.js", "three/addons/": "../vendor/three/addons/" } }</script>
+</head><body><div id="out"></div><pre id="errors"></pre>
+<script type="module">
+/* Dev page: frozen moments of an animation, side by side.
+ *   ?anim=wave|hop|spin|idle  &times=0.2,0.5,1  &rot=0  &frame=stage  &seed=N | &set=k:v,k:v | &sets=k:v;k:v
+ * Each tile ticks a fresh Stage to the given time (1/60 s steps) and renders it once. */
+import { CC } from '../js/cc.js';
+import { Stage } from '../js/char3d.js';
+const errors = [];
+window.addEventListener('error', (e) => errors.push(String(e.message)));
+window.addEventListener('unhandledrejection', (e) => errors.push(String(e.reason && e.reason.stack || e.reason)));
+for (const f of ['hair','face','clothes','extras']) { try { await import(`../js/parts/${f}.js`); } catch (e) { errors.push(f + ': ' + e); } }
+const q = new URLSearchParams(location.search);
+const anim = q.get('anim') || 'wave';
+const times = (q.get('times') || '0.15,0.3,0.6,0.9,1.2,1.8').split(',').map(Number);
+const rots = (q.get('rot') || '0').split(',').map(Number);
+// &sets=a:1,b:2;c:3 renders every time / rot for each look
+const looks = (q.get('sets') || q.get('set') || '').split(';').map((set) => {
+  const st = q.get('seed') ? CC.randomState(CC.rng(+q.get('seed'))) : CC.defaultState();
+  set.split(',').filter(Boolean).forEach((kv) => { const [k, v] = kv.split(':'); st[k] = v; });
+  return st;
+});
+const out = document.getElementById('out');
+try {
+  for (const state of looks) for (const rot of rots) for (const tm of times) {
+    const t = document.createElement('div'); t.className = 't';
+    const box = document.createElement('div'); box.className = 'st'; t.appendChild(box);
+    const l = document.createElement('div'); l.textContent = `${anim} t=${tm} rot=${rot}`; t.appendChild(l);
+    out.appendChild(t);
+    const st = new Stage(box, { interactive: false });
+    cancelAnimationFrame(st._raf);
+    await st.setState(state, { onError: (c, id, e) => errors.push(`${c}/${id}: ${e.stack || e}`) });
+    if (q.get('frame')) { st.frame = q.get('frame'); st._applyFrame(1); }
+    const ch = st.character;
+    ch.anim.yaw = rot;
+    for (let i = 0; i < 90; i++) ch.tick(1 / 60); // settle into the idle
+    if (anim !== 'idle') ch.play(anim);
+    for (let i = 0; i < Math.round(tm * 60); i++) ch.tick(1 / 60);
+    st._lift = ch.lift; st._applyFrame(1);
+    st.renderer.render(st.scene, st.camera);
+    // keep a picture and free the WebGL context, so many tiles fit on one page
+    const img = new Image();
+    img.src = st.canvas.toDataURL();
+    Object.assign(img.style, { position: 'absolute', inset: '0', width: '100%', height: '100%' });
+    st.dispose();
+    box.appendChild(img);
+    await new Promise((r) => setTimeout(r, 10));
+  }
+} catch (e) { errors.push(String(e.stack || e)); }
+document.getElementById('errors').textContent = errors.join('\n');
+document.title = errors.length ? `ERRORS(${errors.length})` : 'READY';
+</script></body></html>
