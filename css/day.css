@@ -61,11 +61,24 @@ button {
   display: none !important;
 }
 
+/* on tablets and PCs the screen stays phone-shaped (at most 60% as wide as it is tall),
+   centred on a quiet acorn backdrop; phones are narrower than that and fill the screen */
+body {
+  background: #e9dcc0
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140' viewBox='0 0 140 140'%3E%3Cg opacity='.16'%3E%3Cg transform='translate(18 16) scale(.5) rotate(-18 32 32)'%3E%3Cellipse cx='32' cy='40' rx='19' ry='21' fill='%23d39a62'/%3E%3Cpath d='M10 30C10 14 22 6 32 6s22 8 22 24c-7 4-15 4-22 1-7 3-15 3-22-1z' fill='%235e3a20'/%3E%3C/g%3E%3Cg transform='translate(88 82) scale(.5) rotate(16 32 32)'%3E%3Cellipse cx='32' cy='40' rx='19' ry='21' fill='%23d39a62'/%3E%3Cpath d='M10 30C10 14 22 6 32 6s22 8 22 24c-7 4-15 4-22 1-7 3-15 3-22-1z' fill='%235e3a20'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E")
+    repeat;
+}
+
 .day {
   position: fixed;
   inset: 0;
+  width: min(100vw, max(440px, 60vh));
+  width: min(100vw, max(440px, 60dvh));
   height: 100dvh;
+  margin: 0 auto;
   overflow: hidden;
+  background: var(--cream);
+  box-shadow: 0 0 0 1px rgba(122, 82, 50, 0.1), 0 0 60px rgba(74, 51, 35, 0.18);
   user-select: none;
   -webkit-user-select: none;
 }
@@ -74,6 +87,16 @@ button {
   position: absolute;
   inset: 0;
   background: #f4ecd8;
+}
+/* darker corners after dark at home (lamp-lit room); the scene sets --vignette 0..1 */
+.world::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: radial-gradient(ellipse 85% 70% at 50% 55%, rgba(38, 20, 12, 0) 42%, rgba(38, 20, 12, 0.7) 100%);
+  opacity: var(--vignette, 0);
+  transition: opacity 1.5s ease;
 }
 .world canvas {
   display: block;
@@ -115,10 +138,8 @@ button {
   min-width: 0;
   padding: 6px 12px;
   border-radius: 999px;
-  background: rgba(255, 250, 240, 0.86);
+  background: rgba(255, 250, 240, 0.92);
   box-shadow: 0 2px 0 var(--line-2);
-  backdrop-filter: blur(6px);
-  -webkit-backdrop-filter: blur(6px);
 }
 .who-name {
   font-size: 17px;
@@ -185,6 +206,16 @@ button {
   background: var(--acorn) center / contain no-repeat;
   flex: none;
 }
+/* the app's own icons (js/day/icons.js) sit in text like a letter */
+.ic {
+  display: inline-block;
+  width: 1.3em;
+  height: 1.3em;
+  vertical-align: -0.3em;
+  flex: none;
+  overflow: visible;
+}
+
 /* inline acorn (the 🌰 emoji is a chestnut) */
 .ac {
   display: inline-block;
@@ -437,7 +468,49 @@ button {
   display: none;
 }
 
+/* the bed button and the big button, side by side */
+.bar-row {
+  width: 100%;
+  max-width: 420px;
+  display: flex;
+  align-items: stretch;
+  gap: 10px;
+}
+.nap {
+  flex: none;
+  min-width: 84px;
+  min-height: 64px;
+  padding: 0 10px;
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  border: 0;
+  border-radius: 22px;
+  background: #7f8fd0;
+  color: #fff;
+  font-size: 15px;
+  box-shadow: 0 6px 0 #56639c, 0 12px 24px rgba(70, 84, 140, 0.28);
+  transition: transform 0.1s, box-shadow 0.1s, background 0.2s;
+}
+.nap[hidden] {
+  display: none;
+}
+.nap:active {
+  transform: translateY(5px);
+  box-shadow: 0 1px 0 #56639c;
+}
+.nap[data-kind='wake'] {
+  background: #f0b34a;
+  box-shadow: 0 6px 0 #c2852a, 0 12px 24px rgba(194, 133, 42, 0.28);
+}
+.nap[data-kind='wake']:active {
+  box-shadow: 0 1px 0 #c2852a;
+}
 .go {
+  flex: 1;
+  min-width: 0;
   width: 100%;
   max-width: 420px;
   min-height: 64px;
@@ -761,6 +834,29 @@ a.btn {
   width: 22px;
   height: 22px;
   accent-color: var(--green);
+}
+/* a volume: icon, name, slider, number */
+.vol-row {
+  display: grid;
+  grid-template-columns: 22px 5.2em 1fr 2.2em;
+  align-items: center;
+  gap: 8px;
+  font-size: 16px;
+}
+.vol-row .ic {
+  width: 22px;
+  height: 22px;
+}
+.vol-row input[type='range'] {
+  width: 100%;
+  min-width: 0;
+  height: 28px;
+  accent-color: var(--green);
+}
+.vol-row output {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-3);
 }
 .hint {
   font-size: 13px;

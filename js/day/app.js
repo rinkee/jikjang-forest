@@ -25,6 +25,7 @@ import { World } from './world.js';
 import { buildOffice } from './office.js';
 import { buildSubway } from './subway.js';
 import { buildHome } from './home.js';
+import { icon, setRich, setIcon, fillIcons } from './icons.js';
 
 const Q = new URLSearchParams(location.search);
 const TEST = Q.get('test') === '1';
@@ -76,10 +77,11 @@ if (FAKE && Q.has('home')) {
   const sleep = ['tired', 'late'].includes(Q.get('sleep')) ? Q.get('sleep') : null;
   if (Number.isFinite(t)) {
     data.session = null;
-    data.home = { from: t, s0: HP ?? 50, sleepUntil: sleep ? t + C.REST_HOURS * 3600e3 : 0, sleep };
+    data.home = { from: t, s0: HP ?? 50, t0: t, sleepFrom: sleep ? t : 0, sleepUntil: sleep ? t + C.REST_HOURS * 3600e3 : 0, sleep };
   }
 }
 const save = () => store.set(KEY, data);
+fillIcons();
 
 /* ============================================================== DOM */
 const el = {
@@ -104,6 +106,9 @@ const el = {
   plus: $('#plus'),
   barNote: $('#barNote'),
   go: $('#btnGo'),
+  nap: $('#btnNap'),
+  napIc: $('#napIc'),
+  napLb: $('#napLb'),
   goIc: $('#goIc'),
   goLb: $('#goLb'),
   ride: $('#ride'),
@@ -207,7 +212,7 @@ function settingsForm(s) {
       </div>
       <div class="field">일하는 요일<div class="days">${days}</div></div>
       <p class="hint">일한 1분마다 도토리 1개! 퇴근 시간이 지나거나 쉬는 날에 일하면 1.5배예요. 대신 체력이 2배로 닳아요. 체력이 바닥나면 분신은 집에 가요.</p>
-      <p class="hint">⚡ 퇴근하면 집에서 ${C.REST_HOURS}시간은 쉬어야 다시 출근할 수 있어요.</p>
+      <p class="hint">${icon('bolt')} 퇴근하면 집에서 ${C.REST_HOURS}시간은 쉬어야 다시 출근할 수 있어요.</p>
     </div>`;
 }
 function readSettings(root) {
@@ -220,7 +225,7 @@ function readSettings(root) {
 function openOnboarding() {
   el.sheetWrap.dataset.dismiss = 'no';
   openSheet(
-    `<h2 id="sheetTitle">🎉 ${esc(look.name)} ${esc(look.rank || '')}, 입사를 축하해요!</h2>
+    `<h2 id="sheetTitle">${icon('party')} ${esc(look.name)} ${esc(look.rank || '')}, 입사를 축하해요!</h2>
      <p>근무 시간을 알려주세요. 내가 <b>출근하기</b>를 누르면 분신도 같이 지하철을 타고 출근해요.</p>
      ${settingsForm(data.settings)}
      <div class="btns"><button type="button" class="btn" data-act="ok">입사하기 <i class="ac"></i></button></div>`,
@@ -246,18 +251,40 @@ function openSettings() {
      ${settingsForm(data.settings)}
      <div class="form" style="margin-top:14px">
        <label class="toggle-row">소리<input type="checkbox" name="sound" ${sfx.muted ? '' : 'checked'}></label>
+       <label class="vol-row">${icon('music')}<span>배경음악</span><input type="range" name="volBgm" min="0" max="100" step="5" value="${Math.round(sfx.bgm.volume * 100)}"><output>${Math.round(sfx.bgm.volume * 100)}</output></label>
+       <label class="vol-row">${icon('bell')}<span>효과음</span><input type="range" name="volSfx" min="0" max="100" step="5" value="${Math.round(sfx.volume * 100)}"><output>${Math.round(sfx.volume * 100)}</output></label>
      </div>
      <div class="btns">
        <button type="button" class="btn" data-act="ok">저장</button>
-       <a class="btn ghost" href="index.html">🎨 캐릭터 꾸미러 가기</a>
+       <a class="btn ghost" href="index.html">${icon('palette')} 캐릭터 꾸미러 가기</a>
      </div>`,
     (root) => {
+      // the volumes and the sound switch act at once, so they can be set by ear
+      const sound = root.querySelector('[name=sound]');
+      sound.addEventListener('change', () => {
+        sfx.unlock();
+        if (sound.checked === sfx.muted) sfx.toggle();
+        if (sound.checked) sfx.pop();
+      });
+      const slide = (name, set, heard) => {
+        const inp = root.querySelector(`[name=${name}]`);
+        const shown = inp.parentElement.querySelector('output');
+        inp.addEventListener('input', () => {
+          sfx.unlock();
+          set(inp.value / 100);
+          shown.textContent = inp.value;
+        });
+        if (heard) inp.addEventListener('change', heard);
+      };
+      slide('volBgm', (v) => {
+        sfx.bgm.setEnabled(true);
+        sfx.bgm.setVolume(v);
+      });
+      slide('volSfx', (v) => sfx.setVolume(v), () => sfx.pop()); // a pop at the new level when the slider is let go
       root.querySelector('[data-act=ok]').addEventListener('click', () => {
         data.settings = readSettings(root);
         data.configured = true;
         save();
-        const wantSound = root.querySelector('[name=sound]').checked;
-        if (wantSound === sfx.muted) sfx.toggle();
         sfx.pop();
         closeSheet();
         tick();
@@ -273,17 +300,17 @@ function openClockOut() {
   const back = t + C.REST_HOURS * 3600e3;
   el.sheetWrap.dataset.dismiss = '';
   openSheet(
-    `<h2 id="sheetTitle">${early ? '벌써 퇴근할까요? 🌤️' : '오늘도 수고했어요! 🌙'}</h2>
+    `<h2 id="sheetTitle">${early ? `벌써 퇴근할까요? ${icon('sun')}` : `오늘도 수고했어요! ${icon('moon')}`}</h2>
      <p>${early ? `퇴근 시간(${esc(data.settings.end)})까지 ${esc(C.clockLeft(p.toEndMs))} 남았어요. 그래도 괜찮아요.` : '분신도 같이 짐을 챙기고 있어요.'}
         퇴근하면 집에서 ${C.REST_HOURS}시간은 쉬어서, ${C.hm(back)}부터 다시 출근할 수 있어요.</p>
      <div class="facts">
        <span>출근</span><b>${C.hm(data.session.in)}</b>
        <span>근무</span><b>${C.dur(p.minutes)}</b>
-       <span>남은 체력</span><b>⚡ ${Math.ceil(C.staminaAt(data, t))}</b>
+       <span>남은 체력</span><b>${icon('bolt')} ${Math.ceil(C.staminaAt(data, t))}</b>
        <span>이번에 받은 도토리</span><b><i class="ac"></i> ${C.comma(p.acorns)}</b>
      </div>
      <div class="btns">
-       <button type="button" class="btn warm" data-act="out">🏠 퇴근하기</button>
+       <button type="button" class="btn warm" data-act="out">${icon('house')} 퇴근하기</button>
        <button type="button" class="btn ghost" data-act="stay">조금 더 일할래요</button>
      </div>`,
     (root) => {
@@ -318,7 +345,7 @@ function openReceipt() {
          <dt>퇴근</dt><dd>${C.hm(r.out)}</dd>
          <dt>근무</dt><dd>${C.dur(r.minutes)}</dd>
          ${r.overtimeMin ? `<dt>그중 야근</dt><dd>${C.dur(r.overtimeMin)}</dd>` : ''}
-         ${Number.isFinite(r.stamina) ? `<dt>남은 체력</dt><dd>⚡ ${r.stamina}</dd>` : ''}
+         ${Number.isFinite(r.stamina) ? `<dt>남은 체력</dt><dd>${icon('bolt')} ${r.stamina}</dd>` : ''}
        </dl>
        <hr>
        <dl class="big"><dt>받은 도토리</dt><dd><i class="ac"></i> ${C.comma(r.acorns)}</dd></dl>
@@ -326,10 +353,9 @@ function openReceipt() {
        <hr>
        <p class="thanks">오늘도 수고했어요!</p>
        ${r.tired ? `<p class="auto">체력이 다 떨어져서 ${C.hm(r.out)}에 집으로 돌아왔어요.</p>` : r.auto ? `<p class="auto">퇴근 버튼을 안 눌러서 ${C.hm(r.out)}에 퇴근한 걸로 했어요.</p>` : ''}
-       ${r.sleep ? `<p class="auto">${r.tired ? '너무 지쳐서' : '야근하고 와서'} 바로 잠들었어요 💤</p>` : ''}
        ${r.restUntil > now() ? `<p class="auto">${C.hm(r.restUntil)}까지는 집에서 푹 쉬어요.</p>` : ''}
      </div>
-     <div class="btns"><button type="button" class="btn" data-act="ok">집에서 쉬기 🏠</button></div>`,
+     <div class="btns"><button type="button" class="btn" data-act="ok">집에서 쉬기 ${icon('house')}</button></div>`,
     (root) => root.querySelector('[data-act=ok]').addEventListener('click', done)
   );
   sfx.jingle();
@@ -428,6 +454,18 @@ function enter(where) {
   tick();
 }
 
+/** the bed button at home: to bed, or up again */
+function onNap() {
+  if (busy || mode !== 'home') return;
+  sfx.unlock();
+  const t = now();
+  if (C.sentToBed(data, t)) C.wake(data, t);
+  else C.goSleep(data, t);
+  save();
+  sfx.pop(C.sentToBed(data, t) ? 0.8 : 1.2);
+  tick();
+}
+
 function onGo() {
   if (busy) return;
   sfx.unlock();
@@ -460,6 +498,16 @@ function tick(quiet) {
   }
   // the sky, the window views and the room light follow the real clock
   if (world) world.setTime(t);
+  // the place's music, and the office or the house going on around the character
+  {
+    const doing = world && world.active && world.active.routine && world.active.routine.cur;
+    sfx.scene(mode === 'ride' || mode === 'office' || mode === 'home' ? mode : null, doing && doing.id, {
+      night: !!(world && world.sky && world.sky.dark > 0.5),
+      asleep: C.homeSpot(data, t) === 'bed',
+      hour: new Date(t).getHours(),
+    });
+  }
+  el.world.style.setProperty('--vignette', mode === 'home' ? (world.ctx.vignette || 0).toFixed(2) : '0');
   const ctx = world.ctx;
   ctx.now = now;
   ctx.todayAcorns = C.today(data, t);
@@ -496,16 +544,19 @@ function renderHud(t) {
     el.gaugeFill.classList.toggle('reset', frac < lastFrac);
     el.gaugeFill.style.width = `${(frac * 100).toFixed(1)}%`;
     lastFrac = frac;
-    el.gaugeLb.textContent = p.overtime ? '1.5배 적립 중 🌙' : '다음 도토리까지';
+    setRich(el.gaugeLb, p.overtime ? '1.5배 적립 중 :moon:' : '다음 도토리까지');
     const hp = C.staminaAt(data, t);
-    el.barNote.textContent =
+    setRich(
+      el.barNote,
       hp < 25
-        ? `🥱 체력이 얼마 안 남았어요 · ${C.clockLeft(C.exhaustAt(data.session, s) - t)} 뒤 집으로`
-        : `출근 ${C.hm(data.session.in)} · 근무 ${C.dur(p.minutes)}`;
+        ? `:yawn: 체력이 얼마 안 남았어요 · ${C.clockLeft(C.exhaustAt(data.session, s) - t)} 뒤 집으로`
+        : `출근 ${C.hm(data.session.in)} · 근무 ${C.dur(p.minutes)}`
+    );
     el.go.removeAttribute('aria-disabled');
     el.go.dataset.kind = 'out';
-    el.goIc.textContent = '🏠';
+    setIcon(el.goIc, 'house');
     el.goLb.textContent = '퇴근하기';
+    el.nap.hidden = true;
     if (lastToday !== null && today > lastToday) celebrate();
   } else {
     el.sideLb.textContent = '모은 도토리';
@@ -514,18 +565,24 @@ function renderHud(t) {
     el.gauge.hidden = true;
     const spot = world.ctx.spot;
     const until = C.restUntil(data);
+    // to bed and up again: the player's call (not shown once it is in bed for the night anyway)
+    const napping = C.sentToBed(data, t);
+    el.nap.hidden = !(napping || C.canSleep(data, t));
+    el.nap.dataset.kind = napping ? 'wake' : 'sleep';
+    setIcon(el.napIc, napping ? 'sun' : 'zzz');
+    el.napLb.textContent = napping ? '일어나기' : '잠자기';
     if (t < until) {
       // the 6-hour rest at home
-      el.barNote.textContent = `${spot === 'bed' ? '쉿, 자는 중이에요 🌙' : `${C.REST_HOURS}시간은 푹 쉬어요`} · ${C.hm(until)}부터 출근할 수 있어요`;
+      setRich(el.barNote, `${spot === 'bed' ? '쉿, 자는 중이에요 :moon:' : `${C.REST_HOURS}시간은 푹 쉬어요`} · ${C.hm(until)}부터 출근할 수 있어요`);
       el.go.dataset.kind = 'rest';
       el.go.setAttribute('aria-disabled', 'true');
-      el.goIc.textContent = spot === 'bed' ? '💤' : '🛋️';
+      setIcon(el.goIc, spot === 'bed' ? 'zzz' : 'sofa');
       el.goLb.textContent = `쉬는 중 · ${C.clockLeft(until - t)}`;
     } else {
-      el.barNote.textContent = spot === 'bed' ? '쉿, 자는 중이에요 🌙' : C.isWorkday(t, s) ? `오늘 출근 시간 ${s.start}` : '오늘은 쉬는 날이에요 🌿';
+      setRich(el.barNote, spot === 'bed' ? '쉿, 자는 중이에요 :moon:' : C.isWorkday(t, s) ? `오늘 출근 시간 ${s.start}` : '오늘은 쉬는 날이에요 :sprout:');
       el.go.removeAttribute('aria-disabled');
       el.go.dataset.kind = 'in';
-      el.goIc.textContent = '🚇';
+      setIcon(el.goIc, 'train');
       el.goLb.textContent = '출근하기';
     }
   }
@@ -599,7 +656,7 @@ function noCharacter() {
   el.loading.innerHTML = `
     <div class="loading-acorn" aria-hidden="true"></div>
     <p style="text-align:center;line-height:1.6;margin:0 24px">아직 분신이 없어요.<br>캐릭터 공방에서 먼저 만들어 주세요!</p>
-    <a class="btn" href="index.html" style="padding:0 26px">🎨 캐릭터 만들러 가기</a>
+    <a class="btn" href="index.html" style="padding:0 26px">${icon('palette')} 캐릭터 만들러 가기</a>
     <p style="font-size:13px;opacity:.7;margin:0 24px;text-align:center">다른 기기에서 만들었다면 공방의 '공유 링크'를 이 폰에서 열어 주세요.</p>`;
   if (TEST) document.title = 'READY';
 }
@@ -619,7 +676,7 @@ async function start() {
   el.whoName.textContent = look.name;
   el.whoSub.textContent = [look.rank, look.dept].filter(Boolean).join(' · ');
 
-  world = new World(el.world, { onStatus: (s) => (el.status.textContent = s || '') });
+  world = new World(el.world, { onStatus: (s) => setRich(el.status, s || '') });
   world.addSet('office', buildOffice(world));
   world.addSet('subway', buildSubway(world));
   world.addSet('home', buildHome(world));
@@ -634,6 +691,7 @@ async function start() {
   document.addEventListener('visibilitychange', () => !document.hidden && tick());
 
   el.go.addEventListener('click', onGo);
+  el.nap.addEventListener('click', onNap);
   $('#btnSettings').addEventListener('click', () => {
     sfx.unlock();
     openSettings();

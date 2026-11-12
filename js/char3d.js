@@ -223,7 +223,9 @@ function proportionWarp(body, p) {
 
 /* ============================================================== resource kit */
 class Kit {
-  constructor() {
+  /** detail: share of the usual segments for curved shapes (1 = full; see Character({ detail })) */
+  constructor(detail = 1) {
+    this.detail = detail;
     this.items = new Set();
     this.mats = new Map();
     this.pending = [];
@@ -393,18 +395,26 @@ float ccNoise( vec3 x ) {
     f.z );
 }
 `;
+/* How deep the colour shade goes, for every shaded material at once (1 = as designed).
+ * A dim room at night lowers it so unlit areas fall darker instead of staying at their
+ * bright shade colour; lit areas are unaffected. */
+const SHADE_DIM = { value: 1 };
+export function setShadeDim(v) {
+  SHADE_DIM.value = v;
+}
 function colorShade(mat, shade, grain) {
   setShade(mat, shade);
   if (grain) mat.userData.uGrain = { value: new THREE.Vector2(grain.scale, grain.amp) };
   mat.onBeforeCompile = (shader) => {
     shader.uniforms.uShade = mat.userData.uShade;
-    let frag = shader.fragmentShader.replace('void main() {', 'uniform vec3 uShade;\n' + (grain ? GRAIN_GLSL : '') + 'void main() {').replace(
+    shader.uniforms.uDim = SHADE_DIM;
+    let frag = shader.fragmentShader.replace('void main() {', 'uniform vec3 uShade;\nuniform float uDim;\n' + (grain ? GRAIN_GLSL : '') + 'void main() {').replace(
       '#include <opaque_fragment>',
       `{
           const vec3 W = vec3( 0.2126, 0.7152, 0.0722 );
           float lit = dot( outgoingLight, W ) / max( dot( diffuseColor.rgb, W ), 1e-3 );
           float k = smoothstep( 0.42, 1.0, lit );
-          vec3 shaded = diffuseColor.rgb * uShade * ( 0.86 + 0.14 * k );
+          vec3 shaded = diffuseColor.rgb * uShade * ( 0.86 + 0.14 * k ) * uDim;
           outgoingLight = mix( shaded, outgoingLight, k );
         }
         #include <opaque_fragment>`
@@ -566,6 +576,58 @@ function makeMaterials(kit, ctx, shared) {
   };
 }
 
+/* ============================================================== scene materials */
+/* The character's surfaces for the scenes around it (furniture, rooms), so props shade the
+ * same way: colour shading instead of grey shadows, sheen and a woven grain on fabric.
+ * Maps are luminance patterns on white, tinted by the colour. Cached for the page's life. */
+const SCENE_MATS = new Map();
+const sceneKey = (o) => JSON.stringify(o || {}, (k, v) => (v && v.isTexture ? v.uuid : v));
+const sceneCached = (key, make) => {
+  if (!SCENE_MATS.has(key)) SCENE_MATS.set(key, make());
+  return SCENE_MATS.get(key);
+};
+export const sceneMat = {
+  /** fabric. o: map, bump (+bumpScale), roughness, sheen, side, grain (false = smooth) */
+  cloth: (c, o) =>
+    sceneCached('cloth' + c + sceneKey(o), () => {
+      o = o || {};
+      const m = physical({
+        color: colorOf(c),
+        roughness: o.roughness ?? 0.9,
+        sheen: o.sheen ?? 0.6,
+        sheenColor: colorOf(CC.color.light(c, 0.6)),
+        sheenRoughness: 0.6,
+        map: o.map || null,
+        side: o.side ?? THREE.FrontSide,
+      });
+      if (o.bump) {
+        m.bumpMap = o.bump;
+        m.bumpScale = o.bumpScale ?? 1;
+      }
+      return colorShade(m, shadeOf(c, SHADE.cloth), grainOf(o));
+    }),
+  /** oiled or painted wood: a soft satin highlight. o: map (grain), roughness, clearcoat */
+  wood: (c, o) =>
+    sceneCached('wood' + c + sceneKey(o), () => {
+      o = o || {};
+      return colorShade(
+        physical({ color: colorOf(c), roughness: o.roughness ?? 0.6, clearcoat: o.clearcoat ?? 0.2, clearcoatRoughness: 0.45, map: o.map || null, side: o.side ?? THREE.FrontSide }),
+        shadeOf(c, SHADE.hard)
+      );
+    }),
+  /** glossy ceramic / plastic / lacquer */
+  glossy: (c, o) =>
+    sceneCached('glossy' + c + sceneKey(o), () => {
+      o = o || {};
+      return colorShade(physical({ color: colorOf(c), roughness: o.roughness ?? 0.3, clearcoat: 0.7, clearcoatRoughness: 0.2, map: o.map || null }), shadeOf(c, SHADE.hard));
+    }),
+  /** plant leaves: waxy, a little translucent-looking sheen */
+  leaf: (c) => sceneCached('leaf' + c, () => colorShade(physical({ color: colorOf(c), roughness: 0.5, sheen: 0.4, sheenColor: colorOf(CC.color.light(c, 0.5)), clearcoat: 0.3, clearcoatRoughness: 0.4, side: THREE.DoubleSide }), shadeOf(c, SHADE.hard))),
+  metal: (c, o) => sceneCached('metal' + c + sceneKey(o), () => new THREE.MeshStandardMaterial({ color: colorOf(c), metalness: 0.85, roughness: (o && o.roughness) ?? 0.3 })),
+  /** an uncached physical material with the scene shading (for ones that change at run time) */
+  custom: (params, base, o) => colorShade(physical(params), shadeOf(base || params.color || '#ffffff', o && o.cloth ? SHADE.cloth : SHADE.hard), o && o.cloth ? grainOf(o) : null),
+};
+
 /* ============================================================== textures */
 function makeTextures(kit) {
   const finish = (tex, o) => {
@@ -663,7 +725,11 @@ function orientBetween(mesh, a, b) {
 function makeGeo(kit) {
   const T = (g) => kit.track(g);
   const mesh = (geo, mat, o) => place(new THREE.Mesh(T(geo), mat), o);
+  // segments for curved shapes, scaled by the kit's detail (fewer for small, far-off characters)
+  const D = kit.detail || 1;
+  const S = (n, min = 6) => (D === 1 ? n : Math.max(min, Math.round(n * D)));
   const G = {
+    segs: S, // (not "S": the face parts' painting helpers use that name)
     mesh,
     group(...children) {
       const g = new THREE.Group();
@@ -671,10 +737,10 @@ function makeGeo(kit) {
       return g;
     },
     place,
-    sphere: (r, mat, o) => mesh(new THREE.SphereGeometry(r, (o && o.seg) || 40, Math.max(12, Math.round(((o && o.seg) || 40) * 0.75))), mat, o),
+    sphere: (r, mat, o) => mesh(new THREE.SphereGeometry(r, S((o && o.seg) || 40, 8), S(Math.max(12, Math.round(((o && o.seg) || 40) * 0.75)), 6)), mat, o),
     /** ellipsoid with radii rx, ry, rz */
     ellipsoid: (rx, ry, rz, mat, o) => {
-      const m = mesh(new THREE.SphereGeometry(1, (o && o.seg) || 40, 30), mat, o);
+      const m = mesh(new THREE.SphereGeometry(1, S((o && o.seg) || 40, 8), S(30, 6)), mat, o);
       m.scale.set(rx, ry, rz);
       return m;
     },
@@ -683,7 +749,7 @@ function makeGeo(kit) {
       const A = V3(a);
       const B = V3(b);
       const len = A.distanceTo(B);
-      const m = new THREE.Mesh(T(new THREE.CapsuleGeometry(r, Math.max(0.0001, len), 10, (o && o.seg) || 24)), mat);
+      const m = new THREE.Mesh(T(new THREE.CapsuleGeometry(r, Math.max(0.0001, len), S(10, 3), S((o && o.seg) || 24, 6))), mat);
       orientBetween(m, A, B);
       if (o && o.name) m.name = o.name;
       return m;
@@ -694,23 +760,23 @@ function makeGeo(kit) {
       const B = V3(b);
       const len = A.distanceTo(B);
       // CylinderGeometry top (+Y) = radiusTop; we orient +Y from a toward b, so top = b
-      const m = new THREE.Mesh(T(new THREE.CylinderGeometry(rB, rA, len, (o && o.seg) || 28, 1, !!(o && o.open))), mat);
+      const m = new THREE.Mesh(T(new THREE.CylinderGeometry(rB, rA, len, S((o && o.seg) || 28, 6), 1, !!(o && o.open))), mat);
       orientBetween(m, A, B);
       return m;
     },
     cone: (a, b, r, mat, o) => G.cylinder(a, b, r, 0.0001, mat, o),
     /** torus in the XY plane (rotate with o.rot). o.arc = radians */
     torus: (R, tube, mat, o) =>
-      mesh(new THREE.TorusGeometry(R, tube, (o && o.radial) || 14, (o && o.tubular) || 48, (o && o.arc) || Math.PI * 2), mat, o),
+      mesh(new THREE.TorusGeometry(R, tube, S((o && o.radial) || 14, 4), S((o && o.tubular) || 48, 8), (o && o.arc) || Math.PI * 2), mat, o),
     /** rounded box */
-    box: (w, h, d, mat, o) => mesh(new RoundedBoxGeometry(w, h, d, 4, Math.min((o && o.radius) ?? 0.03, w / 2, h / 2, d / 2)), mat, o),
+    box: (w, h, d, mat, o) => mesh(new RoundedBoxGeometry(w, h, d, S(4, 1), Math.min((o && o.radius) ?? 0.03, w / 2, h / 2, d / 2)), mat, o),
     /** lathe around Y from [[r,y],...] (smoothed). u=0.5 is the front (+Z). o.depth scales z */
     lathe(profile, mat, o) {
       o = o || {};
       let pts = profile.map(([r, y]) => new THREE.Vector2(Math.max(0, r), y));
-      if (o.smooth !== false && pts.length > 2) pts = new THREE.SplineCurve(pts).getSpacedPoints(o.samples || 48);
+      if (o.smooth !== false && pts.length > 2) pts = new THREE.SplineCurve(pts).getSpacedPoints(S(o.samples || 48, 8));
       pts = pts.map((p) => new THREE.Vector2(Math.max(0, p.x), p.y));
-      const m = mesh(new THREE.LatheGeometry(pts, o.seg || 48, Math.PI, Math.PI * 2), mat, o);
+      const m = mesh(new THREE.LatheGeometry(pts, S(o.seg || 48, 8), Math.PI, Math.PI * 2), mat, o);
       if (o.depth) m.scale.z *= o.depth;
       return m;
     },
@@ -721,8 +787,8 @@ function makeGeo(kit) {
     tube(points, radius, mat, o) {
       o = o || {};
       const curve = new THREE.CatmullRomCurve3(points.map(V3), !!o.closed, 'centripetal');
-      const seg = o.seg || 48;
-      const radial = o.radial || 16;
+      const seg = S(o.seg || 48, 6);
+      const radial = S(o.radial || 16, 5);
       const r0 = typeof radius === 'function' ? 1 : radius;
       const geo = new THREE.TubeGeometry(curve, seg, r0, radial, !!o.closed);
       if (typeof radius === 'function') {
@@ -766,8 +832,8 @@ function makeGeo(kit) {
         bevelEnabled: bevel > 0,
         bevelThickness: bevel,
         bevelSize: bevel,
-        bevelSegments: 3,
-        curveSegments: o.curveSegments || 24,
+        bevelSegments: S(3, 1),
+        curveSegments: S(o.curveSegments || 24, 6),
       });
       geo.translate(0, 0, -depth / 2);
       return mesh(geo, mat, o);
@@ -813,6 +879,7 @@ function makeHeadHelpers(G) {
     shell({ az = [-180, 180], el = [-90, 90], r = 1.06, mat, seg = 64 } = {}) {
       const [a0, a1] = az;
       const [e0, e1] = el;
+      seg = G.segs(seg, 8);
       const geo = new THREE.SphereGeometry(
         r,
         seg,
@@ -836,7 +903,7 @@ function makeShellHelpers(G) {
      * o.depth overrides the z squash (default A3.torsoDepth). u=0.5 = front center.
      */
     torso({ from = A3.torsoBottom, to = A3.torsoTop, inflate = 0.035, flare = 0, flarePow = 2, mat, seg = 56, depth } = {}) {
-      const n = 40;
+      const n = G.segs(40, 12);
       const pts = [];
       const closeBottom = from <= A3.torsoBottom + 0.005;
       const closeTop = to >= A3.torsoTop - 0.005;
@@ -904,9 +971,38 @@ function makeShellHelpers(G) {
 }
 
 /* ============================================================== ctx */
-function makeCtx(state, cat, kit, shared) {
+/* which state field each shared colour of the context comes from */
+const COLOR_SOURCE = {
+  skin: 'skin', skinShade: 'skin', skinLight: 'skin', skinLine: 'skin', blush: 'skin', featureInk: 'skin', mouthRed: 'skin',
+  hair: 'hairColor', hairShade: 'hairColor', hairLight: 'hairColor', hairLine: 'hairColor', browColor: 'hairColor',
+  eye: 'eyeColor',
+};
+/**
+ * reads(key), when given, is told every state field the part looks at — the shared colours
+ * (skin, hair, eyes) and anything it takes from ctx.state — so the character knows which
+ * changes mean the part must be built again, and leaves it alone for the others.
+ */
+function makeCtx(state, cat, kit, shared, reads) {
   let ctx = CC.makeColorCtx(state);
   if (cat && cat.colorKey) ctx = CC.withColor(ctx, state[cat.colorKey] || CC.DEFAULT_COLORS[cat.colorKey]);
+  if (reads) {
+    Object.keys(COLOR_SOURCE).forEach((k) => {
+      const v = ctx[k];
+      Object.defineProperty(ctx, k, {
+        enumerable: true,
+        get() {
+          reads(COLOR_SOURCE[k]);
+          return v;
+        },
+      });
+    });
+    ctx.state = new Proxy(state, {
+      get(t, k) {
+        if (typeof k === 'string') reads(k);
+        return t[k];
+      },
+    });
+  }
   const G = makeGeo(kit);
   Object.assign(ctx, G, {
     THREE,
@@ -949,7 +1045,14 @@ function getFaceCanvases(state) {
 const BONES = ['head', 'body', 'armL', 'armR'];
 
 export class Character {
-  constructor() {
+  /**
+   * o.detail: share of the usual segments (1 = full; ~0.5 for small figures in a crowd).
+   * o.partDetail: a further share for some parts, by category ({ shoes: 0.6 }): what is
+   * smallest on screen can be coarser than the rest.
+   */
+  constructor(o) {
+    this.detail = (o && o.detail) || 1;
+    this.partDetail = (o && o.partDetail) || {};
     this.root = new THREE.Group();
     this.root.name = 'character';
     this.body = new THREE.Group();
@@ -971,7 +1074,8 @@ export class Character {
     };
     this.shared.skin.userData.shared = true;
     colorShade(this.shared.skin, shadeOf(CC.DEFAULT_COLORS.skin));
-    this.baseKit = new Kit();
+    this.baseKit = new Kit(this.detail);
+    this._retired = []; // replaced parts, freed after the next frame (rendered())
     this.base = {};
     this._buildBase();
 
@@ -984,7 +1088,8 @@ export class Character {
     this.blinkCanvas.height = FACE_H;
     this.faceTex = this._faceTexture(this.faceCanvas);
     this.blinkTex = this._faceTexture(this.blinkCanvas);
-    const faceGeo = new THREE.SphereGeometry(1.004, 96, 64, 20 * DEG, 140 * DEG, 54 * DEG, 90 * DEG);
+    const fd = this.detail;
+    const faceGeo = new THREE.SphereGeometry(1.004, Math.max(24, Math.round(96 * fd)), Math.max(16, Math.round(64 * fd)), 20 * DEG, 140 * DEG, 54 * DEG, 90 * DEG);
     this.faceMat = new THREE.MeshStandardMaterial({
       map: this.faceTex,
       transparent: true,
@@ -1344,7 +1449,7 @@ export class Character {
     };
     b.legs = G.group(leg(A3.hipL, A3.ankleL), leg(A3.hipR, A3.ankleR));
     const foot = (pos) => {
-      const m = G.mesh(warpGeometry(new THREE.SphereGeometry(1, 40, 30), IDENT, IDENT, footShape), skin, { pos });
+      const m = G.mesh(warpGeometry(new THREE.SphereGeometry(1, G.segs(40, 10), G.segs(30, 8)), IDENT, IDENT, footShape), skin, { pos });
       m.scale.set(...A3.footSize);
       return m;
     };
@@ -1395,6 +1500,7 @@ export class Character {
     b.hands = [L.hand, R.hand];
     // head + ears
     b.headMesh = G.sphere(1, skin, { seg: 72 });
+    b.headMesh.name = 'skull'; // the hats and the hair measure themselves against it
     const ear = (az) => {
       const e = G.ellipsoid(0.18, 0.255, 0.16, skin);
       const p = headDir(az, -7).multiplyScalar(0.96);
@@ -1499,10 +1605,11 @@ export class Character {
     return obj;
   }
 
-  _catKey(cat, state) {
+  /** what a part was built from: its own choice and colour, the shape, and the state fields it read */
+  _catKey(cat, state, reads) {
     const deps = (CAT_DEPS[cat.key] || []).map((k) => state[k]);
     deps.push(this.warp.key);
-    return JSON.stringify([state[cat.key], cat.colorKey ? state[cat.colorKey] : null, state.skin, state.hairColor, state.eyeColor, deps]);
+    return JSON.stringify([state[cat.key], cat.colorKey ? state[cat.colorKey] : null, [...reads].sort().map((k) => [k, state[k]]), deps]);
   }
 
   /** apply a state; resolves when textures (face decal, svg textures) are ready */
@@ -1518,34 +1625,43 @@ export class Character {
 
     CC.CATEGORIES.forEach((cat) => {
       if (cat.paletteOnly || cat.kind === 'bg') return;
-      const key = this._catKey(cat, state);
       const cur = this.parts[cat.key];
-      if (cur && cur.key === key) return;
+      if (cur && cur.key === this._catKey(cat, state, cur.reads)) return;
       changed = true;
       if (cur) this._removePart(cat.key);
+      // 'none' is nothing, even in a category with no 'none' item (bare feet at home)
       const part = CC.getPart(cat.key, state[cat.key]);
-      if (!part) return;
-      const kit = new Kit();
-      const entry = { key, kit, objs: [], hide: [] };
+      if (!part || (state[cat.key] === 'none' && part.id !== 'none')) return;
+      const kit = new Kit(this.detail * (this.partDetail[cat.key] || 1));
+      // the same part built again starts from what it read last time (late reads included)
+      const entry = { key: null, id: part.id, kit, objs: [], hide: [], reads: new Set(cur && cur.id === part.id ? cur.reads : []) };
+      // a field first read after the part is built (in a texture callback, say): build again next time
+      const reads = (k) => {
+        if (entry.reads.has(k)) return;
+        entry.reads.add(k);
+        if (entry.key !== null) entry.key = '';
+      };
       this.parts[cat.key] = entry;
       if (cat.kind === 'face') {
         // face parts may add optional 3D bits through { head: obj }
         let out = null;
         try {
-          out = part.render(Object.assign(makeCtx(state, cat, kit, this.shared)));
+          out = part.render(makeCtx(state, cat, kit, this.shared, reads));
         } catch (err) {
           (opts.onError || console.error)(cat.key, part.id, err);
         }
         if (out && typeof out === 'object' && !out.isObject3D) this._collect(entry, out, cat);
+        entry.key = this._catKey(cat, state, entry.reads);
         return;
       }
       let out = null;
       try {
-        out = part.render(makeCtx(state, cat, kit, this.shared));
+        out = part.render(makeCtx(state, cat, kit, this.shared, reads));
       } catch (err) {
         if (opts.onError) opts.onError(cat.key, part.id, err);
         else console.error('[CC3] part failed', cat.key, part.id, err);
       }
+      entry.key = this._catKey(cat, state, entry.reads);
       if (!out) return;
       if (out.isObject3D) this._collect(entry, { [cat.attach || 'body']: out }, cat);
       else if (typeof out === 'object') this._collect(entry, out, cat);
@@ -1622,10 +1738,23 @@ export class Character {
     e.objs.forEach((o) => {
       this._unskin(o);
       if (o.parent) o.parent.remove(o);
-      disposeTree(o);
     });
-    e.kit.dispose();
+    // Freeing the materials now would drop their shader programs, and the part that replaces
+    // this one would have to compile the same programs again on its first frame (tens of
+    // milliseconds, the hitch on every colour change). Keep them until that frame is drawn.
+    this._retired.push(e);
+    if (this._retired.length > 48) this.rendered(); // nobody is drawing this character
     delete this.parts[catKey];
+  }
+
+  /** call after drawing a frame: frees the parts replaced before it (see _removePart) */
+  rendered() {
+    if (!this._retired.length) return;
+    this._retired.forEach((e) => {
+      e.objs.forEach(disposeTree);
+      e.kit.dispose();
+    });
+    this._retired = [];
   }
 
   /** trigger an animation: 'pop' | 'hop' | 'wave' | 'spin' */
@@ -1933,6 +2062,7 @@ export class Character {
 
   dispose() {
     Object.keys(this.parts).forEach((k) => this._removePart(k));
+    this.rendered();
     this.root.traverse((o) => o.geometry && o.geometry.dispose());
     this.baseKit.dispose();
     this.rig.L.skeleton.dispose();
@@ -2048,11 +2178,12 @@ export function makeScene(renderer, o) {
 const liftShare = (f) => (typeof f.whole === 'number' ? f.whole : f.whole ? 0.5 : f.target[1] > 2 ? 1 : f.target[1] > 1 ? 0.5 : 0);
 /* fit (Character.frameFit): with other proportions, head frames follow the head (its centre
  * and size) and the other frames scale with the character's overall height. */
-function setCamera(camera, frameName, aspect, lift, fit) {
+/** where a named frame puts the camera for this character: { target, dist, elev (deg), fov } */
+function resolveFrame(frameName, lift, fit) {
   const f = FRAMES[frameName] || FRAMES.full;
   const t = V3(f.target);
   let dist = f.dist;
-  if (fit && (fit.head !== 1 || Math.abs(fit.height - 1) > 1e-3) && !String(frameName).startsWith('__')) {
+  if (fit && (fit.head !== 1 || Math.abs(fit.height - 1) > 1e-3)) {
     if (!f.whole && f.target[1] > 2) {
       t.y = A3.headCenter[1] + (lift || 0) + (f.target[1] - A3.headCenter[1]) * fit.head;
       dist *= fit.head;
@@ -2061,13 +2192,19 @@ function setCamera(camera, frameName, aspect, lift, fit) {
       dist *= fit.height;
     }
   } else if (lift) t.y += lift * liftShare(f);
-  const e = (f.elev || 0) * DEG;
-  camera.fov = f.fov || FOV;
+  return { target: t, dist, elev: f.elev || 0, fov: f.fov || FOV };
+}
+function placeCamera(camera, r, aspect) {
+  const e = r.elev * DEG;
+  camera.fov = r.fov;
   camera.aspect = aspect;
-  camera.position.set(t.x, t.y + Math.sin(e) * dist, t.z + Math.cos(e) * dist);
-  camera.lookAt(t);
+  camera.position.set(r.target.x, r.target.y + Math.sin(e) * r.dist, r.target.z + Math.cos(e) * r.dist);
+  camera.lookAt(r.target);
   camera.updateProjectionMatrix();
-  return f;
+}
+function setCamera(camera, frameName, aspect, lift, fit) {
+  placeCamera(camera, resolveFrame(frameName, lift, fit), aspect);
+  return FRAMES[frameName] || FRAMES.full;
 }
 
 export function makeRenderer(canvas, o) {
@@ -2131,30 +2268,26 @@ export class Stage {
 
   _applyFrame(k) {
     const aspect = this.canvas.clientWidth / Math.max(1, this.canvas.clientHeight) || 1;
-    const to = FRAMES[this.frame] || FRAMES.stage;
-    const lift = this._lift || 0;
-    if (!this._camFrom || k >= 1) {
-      setCamera(this.camera, this.frame, aspect, lift, this.character.frameFit());
-      return;
-    }
+    // both ends of a move are the frames as fitted to this character, so the camera goes
+    // straight from one to the other (not out to the unfitted frame and back in at the end)
+    const to = resolveFrame(this.frame, this._lift || 0, this.character.frameFit());
     const from = this._camFrom;
-    const e = k < 0.5 ? 4 * k * k * k : 1 - Math.pow(-2 * k + 2, 3) / 2;
-    const lerp = (a, b) => a + (b - a) * e;
-    const mixed = {
-      target: [0, 1, 2].map((i) => lerp(from.target[i], to.target[i])),
-      dist: lerp(from.dist, to.dist),
-      elev: lerp(from.elev || 0, to.elev || 0),
-      whole: lerp(liftShare(from), liftShare(to)),
-    };
-    FRAMES.__tween = mixed;
-    setCamera(this.camera, '__tween', aspect, lift);
+    let now = to;
+    if (from && k < 1) {
+      const e = k < 0.5 ? 4 * k * k * k : 1 - Math.pow(-2 * k + 2, 3) / 2;
+      const lerp = (a, b) => a + (b - a) * e;
+      now = { target: from.target.clone().lerp(to.target, e), dist: lerp(from.dist, to.dist), elev: lerp(from.elev, to.elev), fov: lerp(from.fov, to.fov) };
+    }
+    this._camNow = now;
+    placeCamera(this.camera, now, aspect);
   }
 
   /** move the camera to a named frame ('stage', 'faceZoom', 'top', ...) */
   setFrame(name) {
     if (!FRAMES[name] || name === this.frame) return;
-    const cur = FRAMES[this.frame === '__tween' ? 'stage' : this.frame] || FRAMES.stage;
-    this._camFrom = this._camT < 1 && FRAMES.__tween ? Object.assign({}, FRAMES.__tween) : Object.assign({}, cur);
+    // start from wherever the camera is right now (mid-move included)
+    const c = this._camNow || resolveFrame(this.frame, this._lift || 0, this.character.frameFit());
+    this._camFrom = { target: c.target.clone(), dist: c.dist, elev: c.elev, fov: c.fov };
     this.frame = name;
     this._camT = 0;
   }
@@ -2220,12 +2353,14 @@ export class Stage {
       this._applyFrame(this._camT);
     } else if (this._lift !== lift0) this._applyFrame(1);
     this.renderer.render(this.scene, this.camera);
+    ch.rendered();
   }
 
   /** apply a state (re-renders backdrop when bg changes). Returns setState promise. */
   setState(state, o) {
-    if (state.bg !== this._bgId) {
-      this._bgId = state.bg;
+    const bgId = `${state.bg}|${state.bgColor}`;
+    if (bgId !== this._bgId) {
+      this._bgId = bgId;
       this.bgLayer.innerHTML = CC.backdropSVG(state);
       const svgEl = this.bgLayer.querySelector('svg');
       if (svgEl) Object.assign(svgEl.style, { width: '100%', height: '100%', display: 'block' });
@@ -2286,7 +2421,11 @@ export class Thumbnailer {
     const f = setCamera(this.camera, o.frame || 'full', w / h, this.character.lift, this.character.frameFit());
     this.character.root.rotation.y = o.rotY ?? f.rotY ?? 0;
     this.blob.visible = (o.frame || 'full') !== 'face';
+    // hair and hat fit themselves to each other as their matrices update: settle that first
+    this.scene.updateMatrixWorld(true);
+    this.scene.updateMatrixWorld(true);
     this.renderer.render(this.scene, this.camera);
+    this.character.rendered();
     let out = document.createElement('canvas');
     out.width = w;
     out.height = h;

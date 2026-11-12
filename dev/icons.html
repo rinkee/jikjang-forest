@@ -1,0 +1,30 @@
+<!doctype html><html lang="ko"><head><meta charset="utf-8"><title>LOADING</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Jua&display=swap">
+<link rel="stylesheet" href="../css/day.css">
+<style>
+  html, body { height: auto; overflow: auto; background: #fbf5e6; }
+  body { padding: 16px; font-family: Jua, sans-serif; color: #4a3323; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; }
+  .cell { background: #fffaf0; border: 2px solid #ecdcb9; border-radius: 16px; padding: 10px; display: flex; flex-direction: column; align-items: center; gap: 8px; }
+  .big .ic { width: 64px; height: 64px; }
+  .row { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; justify-content: center; }
+  .pill { padding: 5px 10px; border-radius: 999px; background: rgba(74, 51, 35, 0.72); color: #fffaf0; font-size: 14px; }
+  .note { padding: 5px 10px; border-radius: 999px; background: #f6efe0; font-size: 14px; color: #7a5d45; }
+  .name { font-size: 13px; color: #a68b70; }
+</style>
+</head><body>
+<h2>직장의 숲 아이콘</h2>
+<div class="grid" id="grid"></div>
+<script type="module">
+/* Dev page: every icon in js/day/icons.js, large and on the backgrounds it sits on. */
+import { ICONS, rich } from '../js/day/icons.js';
+const grid = document.getElementById('grid');
+grid.innerHTML = Object.keys(ICONS).map((k) => `
+  <div class="cell">
+    <div class="big">${ICONS[k]}</div>
+    <div class="row"><span class="pill">${rich('상태 :' + k + ':')}</span><span class="note">${rich(':' + k + ': 메모')}</span></div>
+    <span class="name">${k}</span>
+  </div>`).join('');
+document.title = 'READY';
+</script></body></html>

@@ -7,7 +7,7 @@
  * endpoint are left alone.
  * Bump CACHE when the list below changes.
  */
-const CACHE = 'ccws-v2';
+const CACHE = 'ccws-v6';
 const SHELL = [
   './',
   './index.html',
@@ -24,6 +24,7 @@ const SHELL = [
   './js/tuning.js',
   './js/mascot.js',
   './js/sfx.js',
+  './js/bgm.js',
   './js/parts/hair.js',
   './js/parts/face.js',
   './js/parts/clothes.js',
@@ -35,11 +36,15 @@ const SHELL = [
   './js/day/kit.js',
   './js/day/office.js',
   './js/day/subway.js',
+  './js/day/commuters.js',
   './js/day/home.js',
   './js/day/todo.js',
+  './js/day/soft.js',
+  './js/day/icons.js',
   './vendor/three/three.module.js',
   './vendor/three/addons/environments/RoomEnvironment.js',
   './vendor/three/addons/geometries/RoundedBoxGeometry.js',
+  './vendor/three/addons/utils/BufferGeometryUtils.js',
 ];
 const FONT_HOSTS = ['fonts.googleapis.com', 'fonts.gstatic.com'];
 const SLOW_MS = 3000;

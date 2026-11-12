@@ -4,6 +4,9 @@
  *
  * Views: the phone screen (the real World with its sets), the character from four sides
  * with a head-unit ruler, and a free orbit view of the scene with the app camera drawn in.
+ * The subway is a cutscene: scrub through it, or play it as the app does (LED sign and all).
+ * Situations the app only reaches at certain times (overtime, lunch, worn out) and the sound
+ * of every place (music, the office, the house, each sound by itself) can be tried here too.
  * Work in progress is kept in localStorage (DRAFT_KEY), so day.html?draft=1 and
  * index.html?draft=1 can show it before it is saved.
  *
@@ -18,6 +21,7 @@ import { buildOffice } from '../js/day/office.js';
 import { buildSubway } from '../js/day/subway.js';
 import { buildHome } from '../js/day/home.js';
 import { sunTimes } from '../js/day/sky.js';
+import { sfx } from '../js/sfx.js';
 
 const Q = new URLSearchParams(location.search);
 const TEST = Q.get('test') === '1';
@@ -61,7 +65,7 @@ for (const f of ['hair', 'face', 'clothes', 'extras']) {
 }
 
 /* ============================================================== values */
-const pickValues = (t) => ({ character: clone(t.character), camera: clone(t.camera), scenes: clone(t.scenes) });
+const pickValues = (t) => ({ character: clone(t.character), camera: clone(t.camera), vignette: clone(t.vignette || { on: 0, strength: 0.35, size: 0.45, blur: 0 }), scenes: clone(t.scenes) });
 let fileValues = pickValues(TUNING_BASE); // what js/tuning.js holds
 let hasServer = false;
 try {
@@ -99,7 +103,7 @@ const SCENES = [
 const ACT_NAMES = {
   type: '타이핑', coffee: '커피', stretch: '기지개', think: '고민', doze: '꾸벅꾸벅', lunch: '점심 도시락',
   eat: '먹기', tv: 'TV 보기', phone: '폰 보기', relax: '쉬기', pace: '걸어 다니기', idle: '가만히',
-  yawn: '하품', look: '창밖 보기', wave: '손 흔들기', sleep: '자기', nod: '졸기',
+  yawn: '하품', look: '창밖 보기', wave: '손 흔들기', sleep: '자기', nod: '앉아서 졸기', seatPhone: '앉아서 폰 보기',
 };
 const PHONES = { '390x844': [390, 844], '375x667': [375, 667], '430x932': [430, 932] };
 const TURN_POSES = {
@@ -120,7 +124,9 @@ const ui = {
   source: 'mine',
   seed: +(Q.get('seed') || 3),
   turnPose: 'stand',
+  ride: 0.6, // how far along the subway cutscene is (0 opening shot .. 1 stopping at the station)
 };
+const RIDE_MS = 5600; // the app's cutscene length
 ui.minutes = ui.scene.time;
 {
   const d = new Date();
@@ -149,11 +155,11 @@ function currentLook() {
 if (!savedLook() || Q.has('seed')) ui.source = 'random';
 
 /* ============================================================== phone (the real world) */
-const world = new World($('#world'), { tuning: T, onStatus: (s) => ($('#phoneCap').textContent = `폰 화면 (카메라로 본 모습) · ${s}`) });
+const world = new World($('#world'), { tuning: T, onStatus: (s) => ($('#phoneCap').textContent = `폰 화면 (카메라로 본 모습) · ${String(s || '').replace(/\s*:[a-z]+:/g, '')}`) });
 world.addSet('office', buildOffice(world));
 world.addSet('subway', buildSubway(world));
 world.addSet('home', buildHome(world));
-Object.assign(world.ctx, { now: () => Date.now(), todayAcorns: ui.acorns, ride: 0.4, act: null, lunch: false, overtime: false });
+Object.assign(world.ctx, { now: () => Date.now(), todayAcorns: ui.acorns, ride: ui.ride, act: null, lunch: false, overtime: false });
 
 function layoutPhone() {
   const [pw, ph] = PHONES[ui.phone];
@@ -164,15 +170,21 @@ function layoutPhone() {
   const el = $('#phone');
   el.style.width = `${W}px`;
   el.style.height = `${Math.round(H)}px`;
-  // the app's HUD (fixed pixel sizes on the phone), scaled to this preview
-  const top = (165 + 10) * s;
-  const bottom = (80 + 30) * s;
+  // the app's HUD (fixed pixel sizes on the phone), scaled to this preview; during the subway
+  // cutscene the app shows its LED sign and a skip note instead (see fitInsets in app.js)
+  const ride = ui.scene.set === 'subway';
+  const top = ride ? (18 + 50 + 10) * s : (165 + 10) * s;
+  const bottom = ride ? 70 * s : (80 + 30) * s;
   world.setInsets(top, bottom);
   const hud = $('#hud');
   hud.hidden = !ui.hud;
+  ['.who', '.card', '.go'].forEach((k) => (hud.querySelector(k).hidden = ride));
+  ['.led', '.skip'].forEach((k) => (hud.querySelector(k).hidden = !ride));
   hud.querySelector('.who').style.cssText = `top:${10 * s}px;height:${30 * s}px`;
   hud.querySelector('.card').style.cssText = `top:${56 * s}px;height:${108 * s}px`;
   hud.querySelector('.go').style.cssText = `top:${H - 80 * s}px;height:${64 * s}px`;
+  hud.querySelector('.led').style.cssText = `top:${18 * s}px;height:${50 * s}px;font-size:${20 * s}px`;
+  hud.querySelector('.skip').style.cssText = `top:${H - (22 + 30) * s}px;height:${30 * s}px;font-size:${14 * s}px`;
   hud.querySelector('.band').style.cssText = `top:${top}px;bottom:${bottom}px`;
 }
 
@@ -182,9 +194,45 @@ function showScene() {
   world.setTime(studioNow());
   world.ctx.act = ui.act || null;
   world.ctx.todayAcorns = ui.acorns;
-  world.show(sc.set, Object.assign({ spot: undefined, dir: undefined }, sc.ctx, { act: ui.act || null }));
+  world.ctx.ride = ui.ride;
+  // (seat: false keeps the subway's character standing unless a seated activity is picked, so it
+  // does not hop between seat and aisle each time the scene is rebuilt)
+  world.show(sc.set, Object.assign({ spot: undefined, dir: undefined, seat: false }, sc.ctx, { act: ui.act || null }));
   orbit.target.set(...T.scenes[sc.key].target);
   fillActs();
+  // the subway's cutscene controls and LED sign; a scene's own camera angle
+  const subway = sc.set === 'subway';
+  rideBox.hidden = !subway;
+  if (subway) {
+    const hm = new Date(studioNow()).toTimeString().slice(0, 5);
+    $('#ledText').textContent =
+      sc.ctx.dir === 'out' ? `${hm} · 이번 역은 우리집, 우리집 역입니다 · 오늘도 수고하셨습니다` : `${hm} · 이번 역은 직장의숲, 직장의숲 역입니다 · 내리실 문은 오른쪽입니다`;
+  }
+  labelElev();
+  layoutPhone();
+}
+
+/* ============================================================== subway cutscene */
+let rideRun = 0;
+let rideRef = null; // the progress slider (refreshed while playing)
+function setRide(v) {
+  ui.ride = v;
+  world.ctx.ride = v;
+}
+/** play the cutscene as the app does: start on the opening shot, then run for RIDE_MS */
+function playRide() {
+  setRide(0);
+  showScene(); // world.show: the camera jumps to the opening shot, like the start of a ride
+  const id = ++rideRun;
+  const t0 = performance.now();
+  const step = (t) => {
+    if (id !== rideRun) return;
+    const k = Math.min(1, (t - t0) / RIDE_MS);
+    setRide(k);
+    if (rideRef) rideRef.refresh();
+    if (k < 1) requestAnimationFrame(step);
+  };
+  requestAnimationFrame(step);
 }
 
 /* ============================================================== turnaround (4 sides + ruler) */
@@ -513,6 +561,7 @@ select(gChar, '옆 화면 자세', Object.entries(TURN_POSES).map(([k, p]) => [k
 // ---- place
 const gPlace = group('장소');
 select(gPlace, '장소', SCENES.map((s) => [s.key, s.name]), ui.scene.key, (v) => {
+  rideRun++; // stop a cutscene that is playing
   ui.scene = SCENES.find((s) => s.key === v);
   ui.minutes = ui.scene.time;
   ui.act = '';
@@ -585,12 +634,184 @@ slider(gPlace, {
   },
   fileValue: () => 230,
 });
+// the subway cutscene: scrub through it, or play it
+const rideBox = document.createElement('div');
+gPlace.append(rideBox);
+slider(rideBox, {
+  label: '지하철 컷신 진행',
+  min: 0,
+  max: 1,
+  step: 0.01,
+  get: () => ui.ride,
+  set: (v) => {
+    rideRun++;
+    setRide(v);
+  },
+  fileValue: () => 0.6,
+  hint: '0: 다리를 건너는 열차 옆면 · 0.5부터: 가운데 창문으로 다가간 모습 · 0.8부터: 역에 다가가며 느려져요',
+});
+rideRef = rows[rows.length - 1];
+{
+  const play = document.createElement('div');
+  play.className = 'play';
+  play.innerHTML = `<button class="btn green" type="button">▶ 컷신 재생 (${RIDE_MS / 1000}초)</button>`;
+  play.querySelector('button').addEventListener('click', playRide);
+  rideBox.append(play);
+}
+
+// ---- situations the app only reaches at certain times (overtime, worn out, lunch, why it is in bed)
+const SITUATIONS = {
+  '': { name: '보통', ctx: { overtime: false, stamina: 100, lunch: false, sleepWhy: null } },
+  overtime: { name: '야근 중 (회사)', ctx: { overtime: true, stamina: 60, lunch: false, sleepWhy: null } },
+  weary: { name: '체력 바닥 (회사)', ctx: { overtime: false, stamina: 10, lunch: false, sleepWhy: null } },
+  lunch: { name: '점심시간 (회사)', ctx: { overtime: false, stamina: 100, lunch: true, sleepWhy: null } },
+};
+ui.situ = '';
+select(gPlace, '상황', Object.entries(SITUATIONS).map(([k, v]) => [k, v.name]), '', (v) => {
+  ui.situ = v;
+  Object.assign(world.ctx, SITUATIONS[v].ctx);
+  showScene();
+});
+
+// ---- sound: what each place sounds like, without the app's clock and rest limits
+const gSound = group('소리', '장소·동작·시각에 따라 달라져요');
+ui.sound = false;
+ui.mood = ''; // '' = the music of the place shown
+const SOUND_NAMES = {
+  key: '키보드', mouse: '마우스', phone: '전화벨', printer: '프린터', chair: '의자', stapler: '스테이플러',
+  pen: '볼펜', ding: '알림음', steps: '발소리', drawer: '서랍', sip: '커피 한 모금',
+  clock: '시계 초침', tv: 'TV 말소리', laugh: 'TV 웃음', eat: '젓가락·씹기', taps: '폰 톡톡', buzz: '폰 진동', cushion: '쿠션',
+  slipper: '슬리퍼', fridge: '냉장고', drip: '물방울', creak: '마루 삐걱', washer: '세탁기 완료', 
+  car: '자동차 경적', dog: '개 짖는 소리', birds: '새소리', crickets: '귀뚜라미',
+};
+const MOOD_NAMES = { workshop: '공방', office: '회사', subway: '지하철', home: '집', sleep: '잠자리' };
+{
+  const onRow = document.createElement('div');
+  onRow.className = 'play';
+  onRow.innerHTML = `<button class="btn green" type="button">🔈 소리 켜기</button>`;
+  const btn = onRow.querySelector('button');
+  btn.addEventListener('click', () => {
+    ui.sound = !ui.sound;
+    sfx.unlock();
+    if (ui.sound && sfx.muted) sfx.toggle(); // the studio's own switch: the app's mute would keep it silent
+    btn.textContent = ui.sound ? '🔊 소리 끄기' : '🔈 소리 켜기';
+    btn.classList.toggle('green', !ui.sound);
+    btn.classList.toggle('warm', ui.sound);
+    soundTick();
+  });
+  gSound.append(onRow);
+}
+select(gSound, '음악', [['', '장소 따라 (자동)'], ...Object.entries(MOOD_NAMES)], '', (v) => {
+  ui.mood = v;
+  soundTick();
+});
+slider(gSound, { label: '배경음악 음량', min: 0, max: 100, step: 5, get: () => Math.round(sfx.bgm.volume * 100), set: (v) => sfx.bgm.setVolume(v / 100), fileValue: () => 70 });
+slider(gSound, { label: '효과음 음량', min: 0, max: 100, step: 5, get: () => Math.round(sfx.volume * 100), set: (v) => sfx.setVolume(v / 100), fileValue: () => 70 });
+{
+  // every sound by itself
+  const box = document.createElement('div');
+  box.className = 'sounds';
+  const row = (title, kit, names) => `<p class="hint">${title}</p><div class="chips">${names.map((n) => `<button class="chip" type="button" data-kit="${kit}" data-s="${n}">${SOUND_NAMES[n] || n}</button>`).join('')}</div>`;
+  box.innerHTML = row('회사 소리 하나씩 듣기', 'office', sfx.office.SOUNDS) + row('집 소리 하나씩 듣기', 'home', sfx.home.SOUNDS);
+  box.addEventListener('click', (e) => {
+    const b = e.target.closest('.chip');
+    if (!b) return;
+    sfx.unlock();
+    if (sfx.muted) sfx.toggle();
+    // (a moment for the audio to wake up on the very first click)
+    setTimeout(() => sfx[b.dataset.kit].play(b.dataset.s), sfx.state === 'running' ? 0 : 150);
+  });
+  gSound.append(box);
+}
+/** what the place shown sounds like right now (the same call the app makes) */
+function soundTick() {
+  if (!ui.sound) return sfx.scene(null);
+  const set = ui.scene.set;
+  const doing = world.active && world.active.routine && world.active.routine.cur;
+  const place = set === 'subway' ? 'ride' : set;
+  const o = { night: !!(world.sky && world.sky.dark > 0.5), asleep: ui.scene.ctx.spot === 'bed', hour: new Date(studioNow()).getHours() };
+  sfx.scene(place, doing && doing.id, o);
+  if (ui.mood) sfx.bgm.play(ui.mood); // a chosen tune over the place's own sounds
+}
+setInterval(soundTick, 250);
 
 // ---- camera (shared)
-const gCam = group('카메라', '모든 장소 공통');
-slider(gCam, { label: '내려다보는 각도 (°)', min: 0, max: 85, step: 1, get: () => T.camera.elev, set: (v) => (T.camera.elev = v), fileValue: () => fileValues.camera.elev, hint: '0이면 정면, 클수록 위에서 내려다봐요' });
-slider(gCam, { label: '거리 (화면에 담는 높이)', min: 3, max: 24, step: 0.1, get: () => T.camera.height, set: (v) => (T.camera.height = v), fileValue: () => fileValues.camera.height, hint: '클수록 멀리서 봐요 → 캐릭터가 작아져요' });
+const gCam = group('카메라', '화각은 모든 장소 공통');
+// one angle slider for what you are looking at: the shared angle, or the place's own (the subway
+// is seen from beside the bridge, nearly level, so it keeps its angle apart)
+const ownElev = () => T.scenes[ui.scene.key].elev != null;
+const elevRow = slider(gCam, {
+  label: '내려다보는 각도 (°)',
+  min: -5,
+  max: 85,
+  step: 1,
+  get: () => (ownElev() ? T.scenes[ui.scene.key].elev : T.camera.elev),
+  set: (v) => {
+    if (ownElev()) T.scenes[ui.scene.key].elev = v;
+    else T.camera.elev = v;
+  },
+  fileValue: () => (ownElev() ? fileValues.scenes[ui.scene.key].elev : fileValues.camera.elev),
+  hint: '0이면 정면, 클수록 위에서 내려다봐요',
+});
+const elevHint = elevRow.nextElementSibling;
+const elevRef = rows[rows.length - 1];
+/** say which angle and distance the sliders are editing */
+function labelElev() {
+  const own = ownElev();
+  elevRow.querySelector('label span').textContent = own ? `내려다보는 각도 (°) · ${ui.scene.name}만` : '내려다보는 각도 (°)';
+  elevHint.textContent = own
+    ? '0이면 정면, 클수록 위에서 내려다봐요. 지하철은 다리 옆에서 열차를 거의 수평으로 보는 장면이라 각도를 따로 저장해요'
+    : '0이면 정면, 클수록 위에서 내려다봐요. 지하철을 뺀 모든 장소에 같이 적용돼요 (거리도 같아요)';
+  elevRef.refresh();
+  distRow.querySelector('label span').textContent = ownHeight() ? `거리 (화면에 담는 높이) · ${ui.scene.name}만` : '거리 (화면에 담는 높이)';
+  distRef.refresh();
+}
+// distance: the same idea — the subway keeps its own
+const ownHeight = () => T.scenes[ui.scene.key].height != null;
+const distRow = slider(gCam, {
+  label: '거리 (화면에 담는 높이)',
+  min: 3,
+  max: 24,
+  step: 0.1,
+  get: () => (ownHeight() ? T.scenes[ui.scene.key].height : T.camera.height),
+  set: (v) => {
+    if (ownHeight()) T.scenes[ui.scene.key].height = v;
+    else T.camera.height = v;
+  },
+  fileValue: () => (ownHeight() ? fileValues.scenes[ui.scene.key].height : fileValues.camera.height),
+  hint: '클수록 멀리서 봐요 → 캐릭터가 작아져요',
+});
+const distRef = rows[rows.length - 1];
+labelElev();
 slider(gCam, { label: '화각 (°)', min: 10, max: 75, step: 1, get: () => T.camera.fov, set: (v) => (T.camera.fov = v), fileValue: () => fileValues.camera.fov, hint: '작을수록 평평하게, 클수록 원근감이 세져요' });
+
+// ---- vignette: the edges of the picture (all places)
+const gVig = group('비네트', '화면 가장자리 · 모든 장소 공통');
+{
+  const V = () => T.vignette;
+  const onRow = document.createElement('label');
+  onRow.className = 'pick';
+  onRow.innerHTML = '<span>비네트 넣기</span><input type="checkbox">';
+  const box = onRow.querySelector('input');
+  box.addEventListener('change', () => {
+    V().on = box.checked ? 1 : 0;
+    world.applyVignette();
+    changed();
+  });
+  gVig.append(onRow);
+  const apply = () => world.applyVignette();
+  slider(gVig, { label: '어둡기', min: 0, max: 1, step: 0.01, get: () => V().strength, set: (v) => (V().strength = v), fileValue: () => fileValues.vignette.strength, onChange: apply, hint: '모서리가 얼마나 어두워지는지 (0이면 어둡게 하지 않아요)' });
+  slider(gVig, { label: '선명한 범위', min: 0, max: 0.95, step: 0.01, get: () => V().size, set: (v) => (V().size = v), fileValue: () => fileValues.vignette.size, onChange: apply, hint: '가운데에서 여기까지는 그대로, 그 밖으로 갈수록 효과가 세져요' });
+  slider(gVig, { label: '흐리기 (px)', min: 0, max: 12, step: 0.5, get: () => V().blur, set: (v) => (V().blur = v), fileValue: () => fileValues.vignette.blur, onChange: apply, hint: '가장자리를 흐리게. 0이면 선명해요. 켜면 느린 폰에서는 프레임이 떨어질 수 있어요 (버벅이면 자동으로 꺼져요)' });
+  // (after "되돌리기": the checkbox and the layer follow the values again)
+  rows.push({
+    refresh() {
+      box.checked = !!V().on;
+      world.applyVignette();
+    },
+  });
+  box.checked = !!V().on;
+}
 
 // ---- camera target for this place
 const gTarget = group('카메라 중심');
@@ -616,7 +837,7 @@ select(gPhone, '크기', Object.keys(PHONES).map((k) => [k, k.replace('x', ' × 
 });
 const hudRow = document.createElement('label');
 hudRow.className = 'pick';
-hudRow.innerHTML = '<span>앱 화면 가림막 (상단 카드 · 버튼) 표시</span><input type="checkbox" checked>';
+hudRow.innerHTML = '<span>앱 화면 가림막 (상단 카드 · 버튼, 지하철은 안내판) 표시</span><input type="checkbox" checked>';
 hudRow.querySelector('input').addEventListener('change', (e) => {
   ui.hud = e.target.checked;
   layoutPhone();
@@ -726,6 +947,13 @@ window.studio = {
     if (date) ui.date = date;
     world.setTime(studioNow());
     showTime();
+  },
+  /** play the subway cutscene, or show one moment of it (0..1) */
+  playRide,
+  setRide(v) {
+    rideRun++;
+    setRide(v);
+    if (rideRef) rideRef.refresh();
   },
   /** for tests and the console: studio.setProp('head', 0.85) */
   async setProp(k, v) {

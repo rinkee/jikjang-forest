@@ -8,7 +8,8 @@
  *             stars, how many city windows are lit, sun and moon positions, how dark the
  *             room is (lamps), the colour of things outside, and the room lighting.
  * SkyPainter: the views out of the windows (office: city, home: houses and trees,
- *             subway: a long strip) repainted from skyAt as time passes; clouds drift.
+ *             strip: a long band for train windows, skyline: the far city and river behind
+ *             the train, with a see-through sky) repainted from skyAt as time passes.
  */
 import * as THREE from 'three';
 
@@ -178,11 +179,12 @@ function rng(seed) {
 
 /** the fixed parts of a view: where buildings, windows, trees, stars and clouds are */
 function layout(kind, w, h) {
-  const R = rng({ office: 7, home: 19, strip: 31 }[kind]);
-  const base = kind === 'strip' ? h * 0.86 : h;
+  const R = rng({ office: 7, home: 19, strip: 31, skyline: 43 }[kind]);
+  const long = kind === 'strip' || kind === 'skyline';
+  const base = long ? h * 0.86 : h;
   const L = { base, hills: [], buildings: [], trees: [], stars: [], clouds: [], houses: [] };
-  for (let i = 0; i < (kind === 'strip' ? 160 : 70); i++) L.stars.push([R() * w, R() * base * 0.6, R() < 0.15 ? 2.4 : 1.4, 0.4 + R() * 0.6]);
-  for (let i = 0; i < (kind === 'strip' ? 14 : 5); i++) L.clouds.push({ x: R() * w, y: h * (0.08 + R() * 0.28), s: h * (0.045 + R() * 0.05), v: 4 + R() * 6 });
+  for (let i = 0; i < (long ? 160 : 70); i++) L.stars.push([R() * w, R() * base * 0.6, R() < 0.15 ? 2.4 : 1.4, 0.4 + R() * 0.6]);
+  for (let i = 0; i < (long ? 14 : 5); i++) L.clouds.push({ x: R() * w, y: h * (0.08 + R() * 0.28), s: h * (0.045 + R() * 0.05), v: 4 + R() * 6 });
   if (kind === 'home') {
     // a few houses with pitched roofs between the trees
     let x = 10;
@@ -195,17 +197,17 @@ function layout(kind, w, h) {
   } else {
     let x = -10;
     while (x < w) {
-      const bw = w * (kind === 'strip' ? 0.02 + R() * 0.025 : 0.05 + R() * 0.06);
+      const bw = w * (long ? 0.02 + R() * 0.025 : 0.05 + R() * 0.06);
       const bh = h * (0.16 + R() * 0.28);
       const cols = Math.max(1, Math.floor(bw / 14));
       const rows = Math.max(1, Math.floor(bh / 16));
       const wins = [];
       for (let i = 0; i < cols; i++) for (let j = 0; j < rows - 1; j++) wins.push([i, j, R()]);
       L.buildings.push({ x, bw, bh, cols, wins });
-      x += bw + w * (kind === 'strip' ? 0.002 + R() * 0.012 : 0.005 + R() * 0.03);
+      x += bw + w * (long ? 0.002 + R() * 0.012 : 0.005 + R() * 0.03);
     }
   }
-  for (let tx = 0; tx < w + 40; tx += w * (kind === 'strip' ? 0.012 + R() * 0.016 : 0.03 + R() * 0.04)) L.trees.push([tx, h * (0.06 + R() * 0.07)]);
+  for (let tx = 0; tx < w + 40; tx += w * (long ? 0.012 + R() * 0.016 : 0.03 + R() * 0.04)) L.trees.push([tx, h * (0.06 + R() * 0.07)]);
   for (let i = 0; i < 40; i++) L.hills.push(R());
   return L;
 }
@@ -213,13 +215,17 @@ function layout(kind, w, h) {
 function paintView(view, s, t) {
   const { g, w, h, L, kind } = view;
   const base = L.base;
-  // sky
-  const grd = g.createLinearGradient(0, 0, 0, base);
-  grd.addColorStop(0, s.top);
-  grd.addColorStop(0.55, s.mid);
-  grd.addColorStop(1, s.horizon);
-  g.fillStyle = grd;
-  g.fillRect(0, 0, w, h);
+  // sky (the skyline is drawn over a separate sky, so its own stays clear)
+  const clear = kind === 'skyline';
+  if (clear) g.clearRect(0, 0, w, h);
+  else {
+    const grd = g.createLinearGradient(0, 0, 0, base);
+    grd.addColorStop(0, s.top);
+    grd.addColorStop(0.55, s.mid);
+    grd.addColorStop(1, s.horizon);
+    g.fillStyle = grd;
+    g.fillRect(0, 0, w, h);
+  }
   // stars
   if (s.stars > 0.01) {
     L.stars.forEach(([x, y, size, a]) => {
@@ -253,9 +259,11 @@ function paintView(view, s, t) {
     g.fill();
     g.fillStyle = s.top;
     g.globalAlpha = s.moon.vis;
+    if (clear) g.globalCompositeOperation = 'destination-out'; // cut the crescent out of a clear sky
     g.beginPath();
     g.arc(mx + r * 0.42, my - r * 0.28, r * 0.88, 0, Math.PI * 2);
     g.fill();
+    g.globalCompositeOperation = 'source-over';
     g.globalAlpha = 1;
   }
   // clouds drift; lit warm at sunrise and sunset, grey-blue at night
@@ -274,7 +282,7 @@ function paintView(view, s, t) {
   g.fillStyle = O.hill;
   g.beginPath();
   g.moveTo(0, base);
-  for (let x = 0; x <= w; x += w / (kind === 'strip' ? 48 : 16)) g.lineTo(x, base - h * (0.28 + 0.08 * Math.sin(x * 0.013 + 1) + 0.05 * Math.sin(x * 0.041)));
+  for (let x = 0; x <= w; x += w / (kind === 'strip' || kind === 'skyline' ? 48 : 16)) g.lineTo(x, base - h * (0.28 + 0.08 * Math.sin(x * 0.013 + 1) + 0.05 * Math.sin(x * 0.041)));
   g.lineTo(w, base);
   g.fill();
   // buildings, their windows lighting up one by one as it gets dark
@@ -324,6 +332,12 @@ function paintView(view, s, t) {
     for (let i = 0; i < 40; i++) g.fillRect((i * 211) % w, base + ((i * 37) % (h - base - 6)) + 3, 18 + (i % 4) * 8, 2);
     g.fillStyle = 'rgba(60,60,70,0.55)';
     for (let x = 0; x < w; x += 256) g.fillRect(x, 0, 10, h);
+  } else if (kind === 'skyline') {
+    // the river this side of the far bank
+    g.fillStyle = O.water;
+    g.fillRect(0, base, w, h - base);
+    g.fillStyle = `rgba(255,255,255,${(0.3 - s.night * 0.18).toFixed(3)})`;
+    for (let i = 0; i < 40; i++) g.fillRect((i * 211) % w, base + ((i * 37) % (h - base - 6)) + 3, 18 + (i % 4) * 8, 2);
   }
 }
 
@@ -333,19 +347,20 @@ export class SkyPainter {
     this._key = null;
   }
 
-  /** the texture for 'office' | 'home' | 'strip' (made once, repainted in place) */
+  /** the texture for 'office' | 'home' | 'strip' | 'skyline' (made once, repainted in place) */
   texture(kind) {
     if (this.views[kind]) return this.views[kind].tex;
-    const [w, h] = kind === 'strip' ? [2048, 320] : [512, 384];
+    const long = kind === 'strip' || kind === 'skyline';
+    const [w, h] = long ? [2048, 320] : [512, 384];
     const c = document.createElement('canvas');
     c.width = w;
     c.height = h;
     const tex = new THREE.CanvasTexture(c);
     tex.colorSpace = THREE.SRGBColorSpace;
     tex.anisotropy = 4;
-    if (kind === 'strip') {
+    if (long) {
       tex.wrapS = THREE.RepeatWrapping;
-      tex.repeat.set(1.3, 1);
+      if (kind === 'strip') tex.repeat.set(1.3, 1);
     }
     const view = { kind, w, h, g: c.getContext('2d'), tex, L: layout(kind, w, h), drawn: -1, key: null };
     this.views[kind] = view;
@@ -360,7 +375,7 @@ export class SkyPainter {
     const key = `${sky.elev.toFixed(1)}|${sky.morning}`;
     Object.values(this.views).forEach((v) => {
       const stale = v.key !== key;
-      const drift = v.kind !== 'strip' && t - v.drawn > 1.5;
+      const drift = v.kind !== 'strip' && v.kind !== 'skyline' && t - v.drawn > 1.5; // the long ones scroll instead
       if (stale || drift) this._paint(v, sky, t, key);
     });
   }

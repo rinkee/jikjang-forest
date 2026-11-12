@@ -6,14 +6,39 @@
  * the views out of the windows (world.painter), then hands the sky state (sky.js) to the set.
  * frame() returns { target: [x, y, z], w, h, elev } — the world width/height that must stay
  * on screen; the camera backs off until both fit, and eases when the frame changes.
- * Sets get their frame from world.view(key), which reads the camera tuning (js/tuning.js).
+ * Sets get their frame from world.view(key), which reads the camera tuning (js/tuning.js):
+ * the shared angle and distance, or the scene's own `elev` / `height` when it has them (the
+ * subway's side view).
  */
 import * as THREE from 'three';
-import { Character, makeScene, makeRenderer } from '../char3d.js';
+import { Character, makeScene, makeRenderer, setShadeDim } from '../char3d.js';
 import { TUNING } from '../tuning.js';
 import { skyAt, sunTimes, SkyPainter } from './sky.js';
 
 const DEG = Math.PI / 180;
+/** what the character changes into at home: the basic pyjamas (sky blue check), bare feet */
+const HOME_WEAR = { top: 'pajama', topColor: '#9cd3f0', bottom: 'pajama', bottomColor: '#9cd3f0', shoes: 'none' };
+
+/* ============================================================== vignette
+ * The edges of the picture, darkened (and, if asked, softened) by a layer of the page over the
+ * canvas: tuning.vignette = { on, strength, size, blur } (js/tuning.js; the studio edits it live
+ * and calls world.applyVignette()). The dark part is one gradient and costs nothing to speak of;
+ * the blur makes the browser blur what is under it on every frame, so it is dropped first on a
+ * device that cannot keep up (World._watchPace).
+ */
+const VIGNETTE_CSS = '.world-vignette{position:absolute;inset:0;pointer-events:none}.world-vignette i{position:absolute;inset:0}';
+function vignetteLayer() {
+  if (!document.getElementById('world-vignette-css')) {
+    const st = document.createElement('style');
+    st.id = 'world-vignette-css';
+    st.textContent = VIGNETTE_CSS;
+    document.head.append(st);
+  }
+  const el = document.createElement('div');
+  el.className = 'world-vignette';
+  el.innerHTML = '<i></i><i></i>'; // blur under, shade over
+  return el;
+}
 
 export class World {
   constructor(container, o) {
@@ -24,7 +49,15 @@ export class World {
     this.canvas.className = 'world-canvas';
     container.append(this.canvas);
     this.renderer = makeRenderer(this.canvas);
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+    // sharpness: starts at the screen's own (2 at most) and steps down if frames run late (_pace)
+    this.pixelRatio = Math.min(window.devicePixelRatio || 1, 2);
+    this.renderer.setPixelRatio(this.pixelRatio);
+    // the shadow maps are redrawn about 30 times a second, not on every frame (_loop)
+    this.renderer.shadowMap.autoUpdate = false;
+    this.renderer.shadowMap.needsUpdate = true;
+    this._shadowAge = 0;
+    this._shadowN = 0;
+    this._pace = { t: 0, n: 0, hold: 2 };
     const s = makeScene(this.renderer, { shadowSize: 2048 });
     this.scene = s.scene;
     s.ground.visible = false;
@@ -35,13 +68,24 @@ export class World {
     this.lights.key.shadow.camera.updateProjectionMatrix();
     Object.assign(this.lights.sky.shadow.camera, { left: -6, right: 6, top: 6, bottom: -6, far: 30 });
     this.lights.sky.shadow.camera.updateProjectionMatrix();
+    // the soft light from above only darkens what sits under something else (a blurred,
+    // slow-changing shade): its shadow map is redrawn on every third turn, ten times a second
+    this.lights.sky.shadow.autoUpdate = false;
+    this.lights.sky.shadow.needsUpdate = true;
     this.keyBase = this.lights.key.position.clone();
     this.skyBase = this.lights.sky.position.clone();
     // a high, pulled-back view of a little room (the character is about a third of the visible height)
     this.tuning = o.tuning || TUNING; // the studio swaps in its own live copy
+    this.container = container;
+    this.vignette = null;
+    this._noBlur = false; // set when the device could not keep up with it
+    this.applyVignette();
     this.camera = new THREE.PerspectiveCamera(this.tuning.camera.fov, 1, 0.5, 300);
 
-    this.character = new Character();
+    // the character is about a third of the screen's height: it needs far fewer triangles
+    // than in the workshop's close-ups (and it is drawn three times, shadows included)
+    // (its shoes and trousers are a few pixels each: coarser still)
+    this.character = new Character({ detail: o.detail || 0.5, partDetail: { shoes: 0.55, bottom: 0.8 } });
     this.holder = new THREE.Group();
     this.holder.add(this.character.root);
     this.scene.add(this.holder);
@@ -76,8 +120,21 @@ export class World {
 
   /** load a look. Things carried in the hands are left out: the scenes use the hands. */
   async setLook(state) {
+    this.look = state;
     await this.character.setState(state, { animate: false });
-    if (this.character.held.L || this.character.held.R) await this.character.setState(Object.assign({}, state, { acc: 'none' }), { animate: false });
+    if (this.character.held.L || this.character.held.R) {
+      this.look = Object.assign({}, state, { acc: 'none' });
+      await this.character.setState(this.look, { animate: false });
+    }
+  }
+
+  /** the look as worn in a set: pyjamas and bare feet at home */
+  _dress(name) {
+    if (!this.look) return;
+    const want = name === 'home' ? Object.assign({}, this.look, HOME_WEAR) : this.look;
+    const cur = this.character.state;
+    if (cur && Object.keys(HOME_WEAR).every((k) => cur[k] === want[k])) return;
+    this.character.setState(want, { animate: false }).catch((e) => console.warn("[하루] dress", e));
   }
 
   status(text) {
@@ -97,15 +154,20 @@ export class World {
     this.holder.rotation.set(0, 0, 0);
     this.character.pose = null;
     this.character.anim.yaw = 0;
+    this._dress(name);
     Object.assign(this.ctx, ctx || {});
     set.enter(this.ctx, this);
     this.setTime(this.timeMs); // relights for the new set and hands it the sky
     this._cam = null; // jump, don't ease, into a new set
+    this.renderer.shadowMap.needsUpdate = true;
+    this.lights.sky.shadow.needsUpdate = true;
+    this._pace.hold = 2; // the first frames of a set compile its shaders: don't count them
   }
 
   /** the time of day (ms since epoch, local clock): sky, window views, room light */
   setTime(ms) {
     this.timeMs = ms;
+    setShadeDim(1); // a set may deepen the shade for its own night lighting (sky())
     const s = skyAt(ms);
     this.sky = s;
     this.mood = s.mood;
@@ -170,18 +232,46 @@ export class World {
   _resize() {
     const w = Math.max(1, this.container.clientWidth);
     const h = Math.max(1, this.container.clientHeight);
+    this.size = { w, h };
     this.renderer.setSize(w, h, false);
+    this.renderer.shadowMap.needsUpdate = true;
     this.camera.aspect = w / h;
     this.camera.updateProjectionMatrix();
+  }
+
+  /** show the vignette as the tuning says (call again after changing tuning.vignette) */
+  applyVignette() {
+    const v = this.tuning.vignette || {};
+    const blur = this._noBlur ? 0 : +v.blur || 0;
+    const strength = +v.strength || 0;
+    if (!v.on || (strength <= 0 && blur <= 0)) {
+      if (this.vignette) this.vignette.hidden = true;
+      return;
+    }
+    if (!this.vignette) {
+      this.vignette = vignetteLayer();
+      this.container.append(this.vignette);
+    }
+    this.vignette.hidden = false;
+    const [soft, shade] = this.vignette.children;
+    const from = `${Math.round(Math.min(0.98, Math.max(0, +v.size || 0)) * 100)}%`;
+    const shape = 'ellipse farthest-corner at 50% 52%';
+    shade.style.background = `radial-gradient(${shape}, rgba(46,26,14,0) ${from}, rgba(46,26,14,${strength.toFixed(3)}) 100%)`;
+    soft.hidden = blur <= 0;
+    if (blur > 0) {
+      const mask = `radial-gradient(${shape}, transparent ${from}, #000 100%)`;
+      soft.style.backdropFilter = soft.style.webkitBackdropFilter = `blur(${blur}px)`;
+      soft.style.maskImage = soft.style.webkitMaskImage = mask;
+    }
   }
 
   /** the camera frame for a scene key (office, home_table, subway_in, ...) from the tuning */
   view(key, aspect) {
     const T = this.tuning;
     const s = (T.scenes && T.scenes[key]) || { target: [0, 1.6, 0] };
-    const h = T.camera.height;
+    const h = s.height ?? T.camera.height; // a scene may keep its own distance and angle
     const tall = aspect < 0.8;
-    return { target: s.target, w: h * (tall ? 0.82 : 1.58), h, elev: T.camera.elev };
+    return { target: s.target, w: h * (tall ? 0.82 : 1.58), h, elev: s.elev ?? T.camera.elev };
   }
 
   /** pixels of the screen covered by UI at the top and bottom */
@@ -206,8 +296,7 @@ export class World {
     }
     const fov = this.camera.fov * DEG;
     const vh = Math.tan(fov / 2);
-    const W = Math.max(1, this.container.clientWidth);
-    const H = Math.max(1, this.container.clientHeight);
+    const { w: W, h: H } = this.size;
     const band = Math.max(0.35, (H - c.top - c.bottom) / H); // share of the height left for the scene
     const dist = Math.max(c.h / 2 / (vh * band), c.w / 2 / (vh * aspect));
     // shift the picture so the target sits in the middle of the uncovered band
@@ -217,25 +306,68 @@ export class World {
     this.camera.lookAt(c.x, c.y, c.z);
   }
 
+  /**
+   * Frames that keep arriving late (under about 45 a second for a second and a half) mean the
+   * screen has more pixels than this device can fill: render a step less sharp, down to 1.
+   */
+  _watchPace(raw) {
+    const p = this._pace;
+    if (p.hold > 0 || raw > 0.25) {
+      p.hold = Math.max(0, p.hold - raw); // a new set, or back from another tab
+      p.t = p.n = 0;
+      return;
+    }
+    p.t += raw;
+    p.n++;
+    if (p.t < 1.5) return;
+    const late = p.t / p.n > 1 / 45;
+    p.t = p.n = 0;
+    if (!late) return;
+    const vg = this.tuning.vignette;
+    if (vg && vg.on && vg.blur > 0 && !this._noBlur) {
+      // the first thing to go on a slow device: the blurred edges
+      this._noBlur = true;
+      this.applyVignette();
+      p.hold = 0.5;
+      return;
+    }
+    if (this.pixelRatio <= 1) return;
+    this.pixelRatio = Math.max(1, this.pixelRatio - 0.25);
+    this.renderer.setPixelRatio(this.pixelRatio);
+    p.hold = 0.5;
+  }
+
   _loop() {
     this._raf = requestAnimationFrame(this._loop);
     if (document.hidden) {
       this.clock.getDelta();
       return;
     }
-    const dt = Math.min(0.05, this.clock.getDelta());
+    const raw = this.clock.getDelta();
+    this._watchPace(raw);
+    const dt = Math.min(0.05, raw);
     this.t += dt;
+    this._shadowAge += dt;
+    if (this._shadowAge >= 0.03) {
+      this._shadowAge = 0;
+      this.renderer.shadowMap.needsUpdate = true;
+      if (this._shadowN++ % 3 === 0) this.lights.sky.shadow.needsUpdate = true;
+    }
     if (this.active) this.active.update(dt, this.t, this.ctx, this);
     if (this.sky) this.painter.paint(this.sky, this.t); // clouds drift
     this.character.tick(dt);
     this._frame(dt);
     this.renderer.render(this.scene, this.camera);
+    this.character.rendered();
   }
 
   /** render one frame now (tests / screenshots) */
   renderNow() {
+    this.renderer.shadowMap.needsUpdate = true;
+    this.lights.sky.shadow.needsUpdate = true;
     this._frame(1);
     this.renderer.render(this.scene, this.camera);
+    this.character.rendered();
   }
 
   dispose() {
@@ -244,6 +376,7 @@ export class World {
     this.character.dispose();
     this.renderer.dispose();
     this.canvas.remove();
+    if (this.vignette) this.vignette.remove();
   }
 }
 

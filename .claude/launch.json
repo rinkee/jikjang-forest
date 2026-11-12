@@ -20,6 +20,11 @@
         "tools/studio.mjs"
       ],
       "port": 5180
+    },
+    {
+      "name": "terminal-server",
+      "url": "http://127.0.0.1:5180",
+      "port": 5180
     }
   ]
 }

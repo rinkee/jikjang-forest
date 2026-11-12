@@ -797,15 +797,15 @@ function hairBand(THREE, roots, elAt, win) {
 
 /**
  * Hats adapt to the hairstyle underneath. The hat measures the hair object that sits next
- * to it on the head (its visible main-volume meshes, userData.hairVolume, above the hat's
- * rim) and picks the smallest uniform scale + small forward/back shift that still encloses
- * every hair point, so quiffs / spikes never poke through and the back does not float.
- * Buns and the squashed "hat hair" variants are handled by hair.js (hideUnderHats); the hat
- * refits whenever the visible hair variant changes. Runs inside updateMatrixWorld, so it also
- * refits when only the hair changes (the hat is not rebuilt then) and works for single-frame
- * thumbnail renders.
+ * to it on the head (its visible main-volume meshes, userData.hairVolume) and the scalp,
+ * direction by direction (fitHat), and is worn as small as that allows: hats that are pulled
+ * on sit on the pressed "hat hair" (hair.js presses it, hideUnderHats), bands rest on the
+ * loose hair, and small pieces (pins, bows, a party hat) move out to the hair where they sit
+ * (perchOf). Buns and the squashed "hat hair" variants are handled by hair.js; the hat refits
+ * whenever the visible hair changes. Runs inside updateMatrixWorld, so it also refits when
+ * only the hair changes (the hat is not rebuilt then) and works for single-frame thumbnail
+ * renders. dev/hat-audit.js checks every hat on every hairstyle.
  */
-const HAIR_REF = 1.19; // hair radius the hats are modelled for (their inner surface is >= 1.235)
 
 /** visit every visible mesh under obj with its matrix relative to obj's parent */
 function walkMeshes(THREE, obj, M, fn) {
@@ -825,7 +825,7 @@ function eachVert(THREE, mesh, MM, maxN, fn) {
 function hairSignature(roots) {
   let sig = '';
   roots.forEach((r) => {
-    sig += r.uuid;
+    sig += r.uuid + (r.userData.pressed ? 'p' : '');
     r.traverse((o) => {
       if (o.userData.hatMode || o.userData.hatDir) sig += o.visible ? '1' : '0';
     });
@@ -833,45 +833,76 @@ function hairSignature(roots) {
   return sig || 'bald';
 }
 
-/** smallest uniform scale k (and z shift) so the hat encloses the hair volume above its rim */
-function fitHat(THREE, roots, o) {
-  const t = (o.tilt || 0) * D;
-  const ct = Math.cos(t);
-  const st = Math.sin(t);
-  const sr = Math.sin((o.rim ?? 6) * D);
+/**
+ * How big a hat has to be worn. shape: how near the hat (at its modelled size) comes in every
+ * direction (CC.headGrid). In each of those directions the hat must clear whatever is under it
+ * there, the hair or the scalp:
+ *   - a hat pulled on over pressed hair clears all of it (nothing pokes through);
+ *   - a band, a pin or a party hat rests on loose hair: it sits on the hair along most of its
+ *     length and sinks into the odd tuft that stands higher, as such things do.
+ * So the hat is as small as it can be for this head and this hair, and never floats above it.
+ */
+function fitHat(THREE, roots, head, shape) {
+  const H = CC.headGrid;
   let flagged = false;
   roots.forEach((r) => r.traverse((m) => (flagged = flagged || !!(m.isMesh && m.userData.hairVolume))));
-  const P = [];
-  roots.forEach((root) =>
-    walkMeshes(THREE, root, new THREE.Matrix4(), (mesh, MM) => {
-      if (flagged && !mesh.userData.hairVolume) return; // buns / tails / ties do not size the hat
-      eachVert(THREE, mesh, MM, 2500, (v) => {
-        const r = v.length();
-        if (r < 0.85) return;
-        if ((v.y * ct - v.z * st) / r < sr) return; // below the hat's rim (hat frame)
-        P.push(v.x, v.y, v.z);
-      });
-    })
-  );
-  let best = { k: 1.04 / HAIR_REF, oz: 0, score: 9 };
-  for (let oz = -0.06; oz <= 0.2201; oz += 0.02) {
-    let m = 1.04 + Math.abs(oz); // never smaller than the bare skull
-    for (let i = 0; i < P.length; i += 3) {
-      const dz = P[i + 2] - oz;
-      const d = P[i] * P[i] + P[i + 1] * P[i + 1] + dz * dz;
-      if (d > m * m) m = Math.sqrt(d);
+  // buns / tails / ties do not size the hat
+  const hair = H.grid(THREE, roots, 'max', (mesh) => !flagged || !!mesh.userData.hairVolume);
+  const scalp = H.scalp(THREE, head);
+  const pressed = roots.some((r) => r.userData.pressed);
+  const pad = pressed ? 0.012 : -0.005;
+  const collect = (inside) => {
+    const need = [];
+    for (let c = 0; c < shape.length; c++) {
+      if (!shape[c]) continue;
+      if (inside) {
+        // not the hat's very edge: the hair comes out from under it there, at its full thickness
+        const row = Math.floor(c / H.GA);
+        const col = c % H.GA;
+        const near = [row * H.GA + ((col + 1) % H.GA), row * H.GA + ((col + H.GA - 1) % H.GA), c - H.GA, c + H.GA];
+        if (near.some((k) => k >= 0 && k < shape.length && !shape[k])) continue;
+      }
+      need.push((Math.max(hair[c], scalp[c]) + pad) / shape[c]);
     }
-    const k = m / HAIR_REF;
-    const score = k + 0.08 * Math.abs(oz);
-    if (score < best.score) best = { k, oz, score };
+    return need.sort((x, y) => x - y);
+  };
+  let need = pressed ? collect(true) : [];
+  if (!need.length) need = collect(false);
+  if (!need.length) return { k: 1, oz: 0 };
+  const k = pressed ? need[need.length - 1] : need[Math.min(need.length - 1, Math.floor(need.length * 0.9))];
+  return { k: clamp(k, 0.8, 1.6), oz: 0 };
+}
+
+/**
+ * A piece that sits at one spot (a pin, a bow, a sprout, a party hat) rather than going round
+ * the head: the direction of that spot and how far out the piece starts, or null for hats and
+ * bands (anything spread over more than about 50 degrees).
+ */
+function perchOf(THREE, shape) {
+  const H = CC.headGrid;
+  const dirs = [];
+  const mean = new THREE.Vector3();
+  let r = 9;
+  for (let c = 0; c < shape.length; c++) {
+    if (!shape[c]) continue;
+    const el = (Math.floor(c / H.GA) + 0.5) * H.GRID - 90;
+    const az = ((c % H.GA) + 0.5) * H.GRID - 180;
+    const d = new THREE.Vector3(Math.cos(el * D) * Math.sin(az * D), Math.sin(el * D), Math.cos(el * D) * Math.cos(az * D));
+    dirs.push(d);
+    mean.add(d);
+    r = Math.min(r, shape[c]);
   }
-  best.k = clamp(best.k, 0.9, 1.45);
-  return best;
+  if (!dirs.length || mean.length() < 1e-6) return null;
+  mean.normalize();
+  const spread = Math.max(...dirs.map((d) => Math.acos(clamp(d.dot(mean), -1, 1)) / D));
+  return spread < 50 ? { dir: mean, r } : null;
 }
 
 function fitToHair(ctx, outer, inner, base, o) {
   const THREE = ctx.THREE;
   let lastKey = null;
+  let shape = null;
+  let perch = null;
   const home = outer.position.clone();
   inner.scale.setScalar(base);
   outer.updateMatrixWorld = function (force) {
@@ -883,20 +914,34 @@ function fitToHair(ctx, outer, inner, base, o) {
         lastKey = key;
         let f = { k: 1, oz: 0 };
         try {
-          f = fitHat(THREE, hair, o);
+          if (o.adjust) {
+            // the piece chooses its own spot for this hair first (and so changes shape)
+            try {
+              o.adjust(hair);
+            } catch (e) {
+              /* keep the default placement */
+            }
+          }
+          if (!shape || o.adjust) {
+            // the hat at the size it was modelled, in the head's space
+            inner.scale.setScalar(base);
+            this.position.copy(home);
+            shape = CC.headGrid.grid(THREE, [this], 'min');
+            perch = perchOf(THREE, shape);
+          }
+          f = fitHat(THREE, hair, head, shape);
         } catch (e) {
           f = { k: 1, oz: 0 };
         }
-        inner.scale.setScalar(base * f.k);
-        this.position.set(home.x, home.y, home.z + f.oz);
-        this.userData.hairFit = f.k;
-        if (o.adjust) {
-          try {
-            o.adjust(hair);
-          } catch (e) {
-            /* keep the default placement */
-          }
+        if (perch) {
+          // a small piece sitting at one spot moves out to the hair there; it does not grow with it
+          inner.scale.setScalar(base);
+          this.position.copy(home).addScaledVector(perch.dir, perch.r * (f.k - 1));
+        } else {
+          inner.scale.setScalar(base * f.k);
+          this.position.set(home.x, home.y, home.z + f.oz);
         }
+        this.userData.hairFit = f.k;
       }
     }
     THREE.Object3D.prototype.updateMatrixWorld.call(this, force);
@@ -2375,15 +2420,23 @@ CC.register('bg', [
     name: '단색 파스텔',
     render(ctx) {
       const id = ctx.id;
-      const defs = B.rad(id('bg'), [[0, '#fffaf0'], [0.65, '#fbeedd'], [1, '#f3dfc5']], 0.5, 0.45, 0.75) + B.rad(id('fl'), [[0, '#efd9bc', 0.9], [1, '#efd9bc', 0]]);
+      // every tone comes from the chosen colour (state.bgColor): lighter in the middle, deeper
+      // toward the edges, the floor shadow and the dots deeper still
+      const c = ctx.color || '#fbeedd';
+      const rgb = CC.color.hexToRgb(c);
+      // k < 1 lighter, k > 1 deeper: the distance from white scaled by k (and a touch darker, so white deepens too)
+      const deep = (k) => CC.color.rgbToHex(rgb.map((v) => 255 - (255 - v) * k - (k > 1 ? (k - 1) * 10 : 0)));
+      const floor = deep(1.9);
+      const defs = B.rad(id('bg'), [[0, deep(0.3)], [0.65, c], [1, deep(1.6)]], 0.5, 0.45, 0.75) + B.rad(id('fl'), [[0, floor, 0.9], [1, floor, 0]]);
       let o = `<defs>${defs}</defs>`;
       o += B.rect(0, 0, 600, 600, `url(#${id('bg')})`);
       o += B.ellipse(300, 528, 230, 54, `url(#${id('fl')})`);
+      const dot = deep(1.5);
       o += scatter(18, 2, (a, b, c2) => {
         const x = a * 600;
         const y = b * 600;
         if (!outsideCenter(x, y)) return '';
-        return B.circle(x, y, 3 + c2 * 5, '#f6e2c6', 'opacity="0.9"');
+        return B.circle(x, y, 3 + c2 * 5, dot, 'opacity="0.9"');
       });
       return o;
     },

@@ -44,6 +44,15 @@ const FONT = (px) => `${px}px Jua, "Apple SD Gothic Neo", "Malgun Gothic", "Noto
 const $ = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => Array.from(r.querySelectorAll(s));
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+/** after the next frame is drawn (or 60 ms, when the page is hidden and draws none) */
+const nextFrame = () =>
+  new Promise((r) => {
+    const t = setTimeout(r, 60);
+    requestAnimationFrame(() => {
+      clearTimeout(t);
+      setTimeout(r, 0);
+    });
+  });
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 const warn = (...a) => console.warn('[공방]', ...a);
 const partWarn = (cat, id, err) => console.warn('[공방] part failed:', cat, id, (err && err.message) || err);
@@ -308,7 +317,7 @@ function setTab(key) {
 
 function optionsFor(cat) {
   if (cat.paletteOnly) return cat.palette.map((c, i) => ({ value: c, name: SKIN_NAMES[i] || `톤 ${i + 1}` }));
-  return (CC.parts[cat.key] || []).map((p) => ({ value: p.id, name: p.name || p.id }));
+  return (CC.parts[cat.key] || []).filter((p) => !p.hidden).map((p) => ({ value: p.id, name: p.name || p.id }));
 }
 const currentValue = (cat) => (cat.paletteOnly ? state[cat.colorKey] : state[cat.key]);
 
@@ -364,7 +373,8 @@ function makeTile(cat, o, i) {
 function renderPalette(cat) {
   const p = el.palette;
   p.innerHTML = '';
-  if (cat.paletteOnly || !cat.colorKey || !cat.palette) {
+  // some colours belong to one option only (the plain backdrop's): no palette for the others
+  if (cat.paletteOnly || !cat.colorKey || !cat.palette || (cat.colorFor && !cat.colorFor.includes(state[cat.key]))) {
     p.hidden = true;
     return;
   }
@@ -387,6 +397,33 @@ function renderPalette(cat) {
     b.addEventListener('click', () => chooseColor(cat, c));
     p.append(b);
   });
+  if (cat.customColor) {
+    // any colour at all: the system colour picker, shown as one more swatch
+    const lab = document.createElement('label');
+    lab.className = 'swatch swatch-custom light';
+    lab.title = '직접 고르기';
+    const inp = document.createElement('input');
+    inp.type = 'color';
+    inp.value = state[cat.colorKey] || cat.palette[0];
+    inp.setAttribute('aria-label', '색 직접 고르기');
+    // dragging in the picker previews the colour; letting go records it (one undo step)
+    let from = null;
+    inp.addEventListener('input', () => {
+      if (!from) from = state;
+      commit(Object.assign({}, state, { [cat.colorKey]: inp.value }), { reason: 'color', history: false, quiet: true });
+    });
+    inp.addEventListener('change', () => {
+      if (from && !sameLook(from, state)) {
+        undoStack.push(from);
+        if (undoStack.length > HISTORY_MAX) undoStack.shift();
+        redoStack.length = 0;
+        updateHistoryButtons();
+      }
+      from = null;
+    });
+    lab.append(inp);
+    p.append(lab);
+  }
 }
 
 function updateSelection(animatePick) {
@@ -404,8 +441,19 @@ function updateSelection(animatePick) {
     }
   });
   if (cat.colorKey && !cat.paletteOnly) {
+    // picking another option may bring its colours in, or take them away
+    const shown = !cat.colorFor || cat.colorFor.includes(state[cat.key]);
+    if (shown === el.palette.hidden) renderPalette(cat);
     const c = state[cat.colorKey];
-    $$('.swatch', el.palette).forEach((s) => s.setAttribute('aria-checked', String(s.dataset.color === c)));
+    const listed = cat.palette.includes(c);
+    $$('.swatch', el.palette).forEach((s) => {
+      if (!s.classList.contains('swatch-custom')) return s.setAttribute('aria-checked', String(s.dataset.color === c));
+      s.setAttribute('aria-checked', String(!listed));
+      if (listed) s.style.removeProperty('--c');
+      else s.style.setProperty('--c', c);
+      const inp = $('input', s);
+      if (inp && inp.value !== c && document.activeElement !== inp) inp.value = c;
+    });
   }
 }
 
@@ -419,7 +467,7 @@ function thumbSig(cat, s) {
     const ctxFaces = cat.thumbContext ? CC.FACE_CATS.filter((k) => k !== cat.key).map((k) => s[k]) : [];
     return [s.skin, s.hairColor, s.eyeColor, cat.colorKey ? s[cat.colorKey] : '', ...ctxFaces].join('|');
   }
-  if (cat.kind === 'bg') return [s.skin, s.hairColor, s.eyeColor].join('|');
+  if (cat.kind === 'bg') return [s.skin, s.hairColor, s.eyeColor, s.bgColor].join('|');
   const o = lookOf(s);
   delete o.bg;
   delete o.v;
@@ -517,7 +565,7 @@ async function pumpThumbs() {
         if (r) applyThumb(job.tile, r);
         else markThumbError(job.tile);
       }
-      await sleep(0); // let the live stage breathe between renders
+      await nextFrame(); // one thumbnail a frame: the live stage keeps moving in between
     }
   } finally {
     tq.running = false;
@@ -1691,6 +1739,7 @@ function greet() {
 /* ============================================================== boot */
 async function boot() {
   if (Q.get('mute') === '1') sfx.forceMute();
+  sfx.bgm.play('workshop'); // starts with the first click or key (sound needs a gesture)
   updateSoundBtn();
   buildTabs();
   syncPlate();

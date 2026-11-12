@@ -7,6 +7,7 @@
  * PART CONTRACT
  *   { id, name, render(ctx) }
  *   - id: stable ascii id, unique in the category ('none' = nothing)
+ *   - hidden: true keeps a part out of the workshop and random looks (worn only by the scenes)
  *   - name: short Korean label shown in the UI
  *   - render(ctx) returns one of
  *       * an SVG string            -> face decal (face categories only, face space 400x260)
@@ -64,6 +65,11 @@ const PALETTES = {
   cloth: [
     '#f7f4ee', '#f3e2b3', '#f6d04d', '#f39a4a', '#f2766b', '#d94a4a', '#f4a6c0', '#9b7fd1', '#34497a',
     '#4f8fe0', '#9cd3f0', '#8fdcc0', '#5bb36a', '#8a9a4b', '#8a5a3c', '#d8c3a5', '#9a9aa3', '#3e3f46',
+  ],
+  // backdrops for the plain background (the first is the original cream)
+  pastel: [
+    '#fbeedd', '#ffe3e3', '#ffd9ec', '#f1e0ff', '#e0e4ff', '#d9ecff', '#d6f5f5', '#dcf5e3', '#eef7d2', '#fff6c9',
+    '#ffe8cc', '#f1e9e2', '#e9ecef', '#ffffff',
   ],
 };
 const P = PALETTES;
@@ -169,7 +175,8 @@ const CATEGORIES = [
   { key: 'glasses', label: '안경', icon: '👓', colorKey: 'glassesColor', palette: P.cloth, kind: '3d', frame: 'face', attach: 'head' },
   { key: 'hat', label: '모자', icon: '🎩', colorKey: 'hatColor', palette: P.cloth, kind: '3d', frame: 'hat', attach: 'head' },
   { key: 'acc', label: '소품', icon: '🎀', colorKey: 'accColor', palette: P.cloth, kind: '3d', frame: 'body', attach: 'body' },
-  { key: 'bg', label: '배경', icon: '🌳', kind: 'bg' },
+  // colorFor: the options the colour applies to; customColor: any colour may be picked, not only the palette
+  { key: 'bg', label: '배경', icon: '🌳', kind: 'bg', colorKey: 'bgColor', palette: P.pastel, colorFor: ['plain'], customColor: true },
 ];
 const FACE_CATS = ['cheeks', 'mouth', 'nose', 'eyes', 'brows']; // paint order (bottom -> top)
 
@@ -177,12 +184,13 @@ const DEFAULT_COLORS = {
   skin: P.skin[1],
   hairColor: P.hair[2],
   eyeColor: P.eye[0],
-  topColor: P.cloth[11],
+  topColor: P.cloth[5], // red
   bottomColor: P.cloth[8],
   shoesColor: P.cloth[0],
   glassesColor: P.cloth[17],
   hatColor: P.cloth[4],
   accColor: P.cloth[5],
+  bgColor: P.pastel[0],
 };
 
 /* --------------------------------------------------------------- the CC object */
@@ -247,7 +255,7 @@ CC.randomState = function (rng, keep) {
   const s = CC.defaultState();
   CATEGORIES.forEach((cat) => {
     if (!cat.paletteOnly) {
-      const list = CC.parts[cat.key] || [];
+      const list = (CC.parts[cat.key] || []).filter((p) => !p.hidden);
       if (list.length) {
         const hasNone = list[0].id === 'none';
         if (hasNone && rng() < 0.55) s[cat.key] = 'none';
@@ -274,7 +282,7 @@ CC.sanitize = function (input) {
   CATEGORIES.forEach((cat) => {
     if (cat.paletteOnly) return;
     const id = input[cat.key];
-    if (typeof id === 'string' && (CC.parts[cat.key] || []).some((p) => p.id === id)) s[cat.key] = id;
+    if (typeof id === 'string' && (CC.parts[cat.key] || []).some((p) => p.id === id && !p.hidden)) s[cat.key] = id;
   });
   return s;
 };
@@ -431,7 +439,8 @@ CC.backdropSVG = function (state, opts) {
   const part = CC.getPart('bg', (state && state.bg) || 'none');
   if (!part) return '';
   try {
-    const ctx = CC.makeColorCtx(state || CC.defaultState(), opts.uid);
+    state = state || CC.defaultState();
+    const ctx = CC.withColor(CC.makeColorCtx(state, opts.uid), state.bgColor || DEFAULT_COLORS.bgColor);
     const out = part.render(ctx) || '';
     if (!out) return '';
     return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 600" preserveAspectRatio="${opts.par || 'xMidYMax slice'}"${
@@ -501,14 +510,17 @@ CC.register('faceShape', [
   shapePart('square', '네모형', { jaw: [[-90, 0.99], [-47, 1.16], [-14, 1.01]] }),
 ]);
 
+/* Kept close to the standard build on purpose: the day scenes seat every body at the same
+ * desk, table and bench, and a belly or hips much deeper than this come out through the
+ * desk top; legs much longer or shorter lift or sink the body past what the scenes allow. */
 CC.register('bodyShape', [
   shapePart('normal', '보통', null),
   shapePart('slim', '슬림', { w: 0.86, d: 0.88 }),
-  shapePart('chubby', '통통', { w: 1.04, d: 1.04, belly: 0.3, leg: 1.12 }),
-  shapePart('tall', '키다리', { w: 0.95, d: 0.95, kL: 1.34, kT: 1.1 }),
-  shapePart('small', '아담', { kL: 0.68, kT: 0.9 }),
-  shapePart('broad', '듬직', { w: 1.06, d: 1.04, shoulder: 0.24, kT: 1.06 }),
-  shapePart('pear', '조롱박', { w: 0.96, hip: 0.3, shoulder: -0.08, leg: 1.14 }),
+  shapePart('chubby', '통통', { w: 1.1, d: 0.94, belly: 0.1, leg: 1.06 }), // round sideways more than forwards
+  shapePart('tall', '키다리', { w: 0.95, d: 0.95, kL: 1.2, kT: 1.06 }),
+  shapePart('small', '아담', { kL: 0.8, kT: 0.94 }),
+  shapePart('broad', '듬직', { w: 1.06, d: 1.0, shoulder: 0.22, kT: 1.04 }),
+  shapePart('pear', '조롱박', { w: 0.96, d: 0.92, hip: 0.22, shoulder: -0.08, leg: 1.06 }),
 ]);
 
 /** smooth outline radius lookup (deg -> r) through [[deg, r], ...]; flat at both poles */

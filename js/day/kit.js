@@ -4,9 +4,25 @@
  */
 import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
+import { sceneMat } from '../char3d.js';
 
 export { THREE };
 export const FONT = 'Jua, "Apple SD Gothic Neo", "Malgun Gothic", "Noto Sans KR", sans-serif';
+
+/* ---------------------------------------------------------------- detail by distance
+ * The camera of a day scene never moves far, and the furniture never moves at all: what stands
+ * along the back wall is always small on screen. Those things are built with fewer segments
+ * (rounder shapes with half as many facets cannot be told apart at that size). A scene says
+ * setDetail(0.5) before building them and setDetail(1) after; the shape helpers here and in
+ * soft.js follow it, and seg(n) does the same for a geometry built by hand.
+ */
+let DETAIL = 1;
+/** how finely the shapes built from here on are divided: 1 = full, 0.5 = half the segments */
+export function setDetail(k) {
+  DETAIL = Math.max(0.25, Math.min(1, k || 1));
+}
+/** n segments at the current detail (never fewer than min) */
+export const seg = (n, min = 3) => (DETAIL === 1 ? n : Math.max(min, Math.round(n * DETAIL)));
 
 const matCache = new Map();
 /** soft matte material, cached by colour + options */
@@ -31,19 +47,24 @@ export function shade(obj, cast = true, receive = true) {
 /** rounded box centred at (x, y, z) */
 export function box(w, h, d, material, x = 0, y = 0, z = 0, r = 0.06) {
   const rr = Math.min(r, w / 2 - 0.001, h / 2 - 0.001, d / 2 - 0.001);
-  const m = new THREE.Mesh(new RoundedBoxGeometry(w, h, d, 3, Math.max(0.001, rr)), material);
+  // a corner this small is a pixel or two on screen: it needs one or two facets, not three
+  // (588 triangles a box with three, 300 with two, 108 with one)
+  const facets = DETAIL < 1 ? 1 : rr < 0.03 ? 1 : rr < 0.1 ? 2 : 3;
+  const m = new THREE.Mesh(new RoundedBoxGeometry(w, h, d, facets, Math.max(0.001, rr)), material);
   m.position.set(x, y, z);
   return shade(m);
 }
 
-export function cyl(rTop, rBot, h, material, x = 0, y = 0, z = 0, seg = 24) {
-  const m = new THREE.Mesh(new THREE.CylinderGeometry(rTop, rBot, h, seg), material);
+export function cyl(rTop, rBot, h, material, x = 0, y = 0, z = 0, around = 24) {
+  const m = new THREE.Mesh(new THREE.CylinderGeometry(rTop, rBot, h, seg(around, 6)), material);
   m.position.set(x, y, z);
   return shade(m);
 }
 
 export function ball(r, material, x = 0, y = 0, z = 0, sx = 1, sy = 1, sz = 1) {
-  const m = new THREE.Mesh(new THREE.SphereGeometry(r, 24, 16), material);
+  // a ball the size of a button needs far fewer facets than one the size of a lamp shade
+  const around = r < 0.05 ? 10 : r < 0.16 ? 16 : 24;
+  const m = new THREE.Mesh(new THREE.SphereGeometry(r, seg(around, 8), seg(Math.round(around * 0.66), 6)), material);
   m.position.set(x, y, z);
   m.scale.set(sx, sy, sz);
   return shade(m);
@@ -150,33 +171,109 @@ export function screenTex() {
 
 /**
  * Wall clock that shows a given time: { group, set(date) }. Faces +Z; hang it on a wall.
+ * A turned wooden rim, a painted dial, tapered hands, a ticking seconds hand, a glass cover.
  */
+let dialTex = null;
 export function wallClock() {
   const clock = new THREE.Group();
-  const face = cyl(0.44, 0.44, 0.06, mat('#fffaf0'), 0, 0, 0, 40);
-  face.rotation.x = Math.PI / 2;
-  const rim = new THREE.Mesh(new THREE.TorusGeometry(0.45, 0.05, 10, 40), mat('#a8754a'));
-  clock.add(face, shade(rim));
-  for (let i = 0; i < 12; i++) {
-    const a = (i / 12) * Math.PI * 2;
-    clock.add(ball(i % 3 ? 0.018 : 0.03, mat('#7a5d45'), Math.sin(a) * 0.35, Math.cos(a) * 0.35, 0.04));
-  }
-  const hand = (len, w) => {
+  const rimM = sceneMat.wood('#a8754a', { roughness: 0.5, clearcoat: 0.35 });
+  // rim: a rounded profile turned round the clock's axis
+  const rim = new THREE.Mesh(
+    new THREE.LatheGeometry(
+      [
+        [0.4, -0.02],
+        [0.47, -0.02],
+        [0.505, 0.01],
+        [0.51, 0.05],
+        [0.49, 0.09],
+        [0.455, 0.1],
+        [0.43, 0.075],
+        [0.4, 0.06],
+      ].map(([r, y]) => new THREE.Vector2(r, y)),
+      seg(56, 20)
+    ),
+    rimM
+  );
+  rim.rotation.x = Math.PI / 2; // the lathe's +y becomes +z (toward the room)
+  if (!dialTex)
+    dialTex = canvasTex(256, 256, (g, w) => {
+      const c = w / 2;
+      const grd = g.createRadialGradient(c, c * 0.8, 10, c, c, c);
+      grd.addColorStop(0, '#fffdf6');
+      grd.addColorStop(1, '#f3ead8');
+      g.fillStyle = grd;
+      g.fillRect(0, 0, w, w);
+      for (let i = 0; i < 60; i++) {
+        const a = (i / 60) * Math.PI * 2;
+        const big = i % 5 === 0;
+        g.save();
+        g.translate(c + Math.sin(a) * c * 0.84, c - Math.cos(a) * c * 0.84);
+        g.rotate(a);
+        g.fillStyle = big ? '#6b4a33' : 'rgba(107,74,51,0.45)';
+        if (big) {
+          g.beginPath();
+          g.arc(0, 0, i % 15 === 0 ? 7 : 4.5, 0, Math.PI * 2);
+          g.fill();
+        } else g.fillRect(-1, -4, 2, 8);
+        g.restore();
+      }
+      // a little acorn under the centre
+      g.fillStyle = '#d39a62';
+      g.beginPath();
+      g.ellipse(c, c + 52, 9, 11, 0, 0, Math.PI * 2);
+      g.fill();
+      g.fillStyle = '#8a5630';
+      g.beginPath();
+      g.ellipse(c, c + 44, 11, 6, 0, Math.PI, 0);
+      g.fill();
+    });
+  const face = new THREE.Mesh(new THREE.CircleGeometry(0.42, 48), sceneMat.custom({ color: '#ffffff', map: dialTex, roughness: 0.6 }, '#fbf3e4'));
+  face.position.z = 0.03;
+  face.receiveShadow = true;
+  clock.add(shade(rim), face);
+  const handM = sceneMat.glossy('#4a3323', { roughness: 0.35 });
+  const hand = (len, w, tail) => {
+    const s = new THREE.Shape();
+    s.moveTo(-w / 2, -tail);
+    s.lineTo(w / 2, -tail);
+    s.lineTo(w * 0.32, len * 0.86);
+    s.quadraticCurveTo(0, len * 1.04, -w * 0.32, len * 0.86);
+    s.closePath();
     const p = new THREE.Group();
-    p.add(box(w, len, 0.02, mat('#4a3323'), 0, len / 2 - 0.04, 0, 0.008));
-    p.position.z = 0.05;
+    const m = new THREE.Mesh(new THREE.ExtrudeGeometry(s, { depth: 0.012, bevelEnabled: true, bevelThickness: 0.004, bevelSize: 0.004, bevelSegments: 2 }), handM);
+    m.castShadow = true;
+    p.add(m);
     clock.add(p);
     return p;
   };
-  const hourHand = hand(0.22, 0.045);
-  const minHand = hand(0.32, 0.03);
-  clock.add(ball(0.035, mat('#e5584f'), 0, 0, 0.07));
+  const hourHand = hand(0.22, 0.05, 0.05);
+  hourHand.position.z = 0.04;
+  const minHand = hand(0.33, 0.034, 0.06);
+  minHand.position.z = 0.058;
+  const secHand = new THREE.Group();
+  secHand.add(box(0.012, 0.42, 0.006, mat('#e5584f'), 0, 0.12, 0, 0.003), cyl(0.025, 0.025, 0.012, mat('#e5584f'), 0, -0.07, 0, 16));
+  secHand.children[1].rotation.x = Math.PI / 2;
+  secHand.position.z = 0.076;
+  clock.add(secHand);
+  const cap = cyl(0.032, 0.032, 0.02, sceneMat.metal('#d2ad6e', { roughness: 0.3 }), 0, 0, 0.085, 20);
+  cap.rotation.x = Math.PI / 2;
+  clock.add(cap);
+  // the glass: a faint dome that only shows its highlight
+  const glass = new THREE.Mesh(
+    new THREE.SphereGeometry(1.6, 40, 8, 0, Math.PI * 2, 0, 0.27),
+    new THREE.MeshPhysicalMaterial({ color: '#ffffff', roughness: 0.05, clearcoat: 1, transparent: true, opacity: 0.12, depthWrite: false })
+  );
+  glass.rotation.x = Math.PI / 2;
+  glass.position.z = 0.1 - 1.6;
+  clock.add(glass);
   return {
     group: clock,
     set(d) {
-      const mins = d.getHours() * 60 + d.getMinutes() + d.getSeconds() / 60;
+      const secs = d.getSeconds();
+      const mins = d.getHours() * 60 + d.getMinutes() + secs / 60;
       minHand.rotation.z = -((mins % 60) / 60) * Math.PI * 2;
       hourHand.rotation.z = -(((mins / 60) % 12) / 12) * Math.PI * 2;
+      secHand.rotation.z = -(secs / 60) * Math.PI * 2;
     },
   };
 }
@@ -256,9 +353,10 @@ export function zzz() {
 
 /* ============================================================== acorn */
 const ACORN = {
-  nut: new THREE.SphereGeometry(1, 18, 14).scale(0.085, 0.1, 0.085).translate(0, -0.02, 0),
-  cap: new THREE.SphereGeometry(1, 18, 10, 0, Math.PI * 2, 0, Math.PI / 2).scale(0.095, 0.07, 0.095).translate(0, 0.035, 0),
-  stem: new THREE.CylinderGeometry(0.012, 0.016, 0.05, 8).translate(0, 0.12, 0),
+  // (an acorn is a few pixels across, and there are dozens of them)
+  nut: new THREE.SphereGeometry(1, 10, 8).scale(0.085, 0.1, 0.085).translate(0, -0.02, 0),
+  cap: new THREE.SphereGeometry(1, 10, 5, 0, Math.PI * 2, 0, Math.PI / 2).scale(0.095, 0.07, 0.095).translate(0, 0.035, 0),
+  stem: new THREE.CylinderGeometry(0.012, 0.016, 0.05, 5).translate(0, 0.12, 0),
 };
 export const ACORN_MAT = {
   nut: new THREE.MeshStandardMaterial({ color: '#d4914f', roughness: 0.45 }),

@@ -48,6 +48,8 @@ const r3 = (v) => Math.round(v * 1000) / 1000;
 function clean(input, current) {
   const c = (input && input.character) || {};
   const cam = (input && input.camera) || {};
+  const vig = (input && input.vignette) || {};
+  const vig0 = current.vignette || { on: 0, strength: 0.35, size: 0.45, blur: 0 };
   const out = {
     character: {
       head: r3(num(c.head, 0.5, 1.4, current.character.head)),
@@ -60,12 +62,22 @@ function clean(input, current) {
       elev: r3(num(cam.elev, -10, 89, current.camera.elev)),
       height: r3(num(cam.height, 2, 40, current.camera.height)),
     },
+    vignette: {
+      on: num(vig.on, 0, 1, vig0.on) ? 1 : 0,
+      strength: r3(num(vig.strength, 0, 1, vig0.strength)),
+      size: r3(num(vig.size, 0, 1, vig0.size)),
+      blur: r3(num(vig.blur, 0, 12, vig0.blur)),
+    },
     scenes: {},
   };
   Object.keys(current.scenes).forEach((key) => {
     const t = input && input.scenes && input.scenes[key] && input.scenes[key].target;
     const base = current.scenes[key].target;
     out.scenes[key] = { target: [0, 1, 2].map((i) => r3(num(Array.isArray(t) ? t[i] : NaN, -20, 20, base[i]))) };
+    // a scene's own camera angle and distance, if it has them
+    const own = (input && input.scenes && input.scenes[key]) || {};
+    if (current.scenes[key].elev != null) out.scenes[key].elev = r3(num(own.elev, -10, 89, current.scenes[key].elev));
+    if (current.scenes[key].height != null) out.scenes[key].height = r3(num(own.height, 2, 40, current.scenes[key].height));
   });
   return out;
 }
@@ -76,14 +88,16 @@ function render(values) {
   const end = src.indexOf('};', start);
   if (start < 0 || end < 0) throw new Error('js/tuning.js: could not find the BASE block');
   const scenes = Object.entries(values.scenes)
-    .map(([k, v], i, a) => `    ${JSON.stringify(k)}: { "target": [${v.target.join(', ')}] }${i < a.length - 1 ? ',' : ''}`)
+    .map(([k, v], i, a) => `    ${JSON.stringify(k)}: { "target": [${v.target.join(', ')}]${v.elev != null ? `, "elev": ${v.elev}` : ''}${v.height != null ? `, "height": ${v.height}` : ''} }${i < a.length - 1 ? ',' : ''}`)
     .join('\n');
   const c = values.character;
   const cam = values.camera;
+  const vig = values.vignette;
   const block =
     'const BASE = {\n' +
     `  "character": { "head": ${c.head}, "torso": ${c.torso}, "legs": ${c.legs}, "width": ${c.width} },\n` +
     `  "camera": { "fov": ${cam.fov}, "elev": ${cam.elev}, "height": ${cam.height} },\n` +
+    `  "vignette": { "on": ${vig.on}, "strength": ${vig.strength}, "size": ${vig.size}, "blur": ${vig.blur} },\n` +
     '  "scenes": {\n' +
     scenes +
     '\n  }\n' +

@@ -180,6 +180,10 @@ function mk(ctx) {
   const sAt = (y) => table(P.ys, P.ss, y);
   const yAt = (s) => table(P.ss, P.ys, s);
   const K = { ctx, THREE, A, Rt };
+  // A character built very small (the commuters, the day character's shoes: detail under 0.4,
+  // see Character({ detail, partDetail })) gets half the facets in its sheets and shoes.
+  const tiny = ctx.segs ? ctx.segs(1000, 1) / 1000 < 0.4 : false;
+  const fewer = (n, min) => (tiny ? Math.max(min, Math.round(n * 0.5)) : n);
   const V = (x, y, z) => new THREE.Vector3(x, y, z);
   const foldAmp = FOLDS;
   /** how far the cloth of the current top stands off its shell at (y, az) */
@@ -237,9 +241,9 @@ function mk(ctx) {
    * Without a0/a1 the sheet is a closed loop. thick > 0 adds an inner face + side walls.
    */
   K.sheet = (o) => {
-    const ys = o.ys || K.rows(o.y0, o.y1, o.rows || 30);
+    const ys = o.ys || K.rows(o.y0, o.y1, fewer(o.rows || 30, 8));
     const nv = ys.length - 1;
-    const nu = o.cols || 64;
+    const nu = fewer(o.cols || 64, 20);
     const loop = o.a0 == null && o.a1 == null;
     const fA0 = fnOf(o.a0, -180);
     const fA1 = fnOf(o.a1, 180);
@@ -449,8 +453,8 @@ function mk(ctx) {
    * zn runs -1 (heel) .. +1 (toe). Returns a mesh; mesh.userData.P(u, zn) gives surface points.
    */
   K.blob = (o, mat) => {
-    const nu = o.nu || 40;
-    const nv = o.nv || 32;
+    const nu = fewer(o.nu || 40, 16);
+    const nv = fewer(o.nv || 32, 12);
     const q = 2 / (o.n ?? 3);
     const sp = (c) => Math.sign(c) * Math.pow(Math.abs(c), q);
     const env = (zn) => {
@@ -788,6 +792,26 @@ const SK = {
 };
 
 /* ================================================================== TOPS */
+/** soft gingham check in colour c, tiled cols x rows over the uv square (torso uv: 24 x 8) */
+function pajamaCheck(K, c, cols, rows) {
+  const ink = deeper(c, 0.3);
+  const tex = K.canvas(
+    64,
+    64,
+    (g, w, h) => {
+      g.fillStyle = c;
+      g.fillRect(0, 0, w, h);
+      g.globalAlpha = 0.3;
+      g.fillStyle = ink;
+      g.fillRect(0, 0, w * 0.42, h);
+      g.fillRect(0, 0, w, h * 0.42);
+      g.globalAlpha = 1;
+    },
+    { repeat: [cols, rows] }
+  );
+  return K.fabric(c, tex, { roughness: 0.86, sheen: 0.45 });
+}
+
 CC.register('top', [
   /* ---------------------------------------------------------------- basic tee */
   {
@@ -1387,6 +1411,38 @@ CC.register('top', [
       return { body, armL: sleeve('L'), armR: sleeve('R') };
     },
   },
+  /* ---------------------------------------------------------------- pyjama shirt: soft check, piped collar and cuffs */
+  {
+    id: 'pajama',
+    name: '기본 파자마',
+    hidden: true, // not picked in the workshop: what the character changes into at home (day/world.js)
+    render(ctx) {
+      const K = mk(ctx);
+      const c = ctx.color;
+      const pipe = ctx.mat.cloth(whiteOn(c), { roughness: 0.85 });
+      const y0 = 0.89;
+      const flare = (y) => 0.016 * (1 - smooth(y0, 1.12, y));
+      const body = ctx.group(topShell(K, { y0, mat: pajamaCheck(K, c, 24, 8), flare }), K.loop(y0, TOP + 0.016, 0.02, pipe));
+      // piped placket, round collar, four buttons
+      body.add(K.sheet({ y0: y0 + 0.004, y1: 1.5, rows: 24, cols: 4, a0: -3.6, a1: 3.6, inflate: TOP + 0.001, flare, thick: 0.008, mat: pipe }));
+      body.add(shirtCollar(K, pipe, { round: true }));
+      const btn = ctx.mat.plastic(contrast(c, 0.22), { roughness: 0.3 });
+      [0.97, 1.09, 1.21, 1.33].forEach((y) => body.add(K.stick(ctx.ellipsoid(0.02, 0.02, 0.009, btn, { seg: 16 }), y, 0, TOP + 0.01, { flare })));
+      // chest pocket with a piped top (wearer's left = viewer's right)
+      body.add(K.sheet({ y0: 1.16, y1: 1.3, rows: 6, cols: 6, a0: 17, a1: 35, inflate: TOP + 0.001, thick: 0.009, mat: pajamaCheck(K, c, 24, 8) }));
+      body.add(K.path([[1.3, 16.6], [1.3, 35.4]], TOP + 0.008, 0.008, pipe, { seg: 8 }));
+      const t1 = 0.82;
+      const arms = sleeves(K, { t1, flare: 0.014, mat: ctx.mat.cloth(c), cuff: { len: 0.055, th: 0.022, grow: 0.008, mat: pipe } });
+      // the check runs along the sleeve, cells about as big as on the body
+      ['L', 'R'].forEach((side) => {
+        const L = K.armInfo(side).len * t1;
+        const sl = arms['arm' + side].children[0];
+        sl.material = pajamaCheck(K, c, 8, Math.max(2, Math.round(L / 0.125)));
+        K.uvByY(sl, -L, 0);
+      });
+      return { body, ...arms };
+    },
+  },
 ]);
 
 /* every top renders with its cloth-fold amplitude switched on (see FOLDS) */
@@ -1779,6 +1835,26 @@ CC.register('bottom', [
       const r = (y) => 0.205 + 0.034 * smooth(0.9, 0.12, y);
       const g = ctx.group(seatShell(K, seat));
       g.add(...pantLegs(K, { yHem: 0.07, r, mat: m, splay: 0.03, n: 30, depth: 1.06 }));
+      return g;
+    },
+  },
+  /* ---------------------------------------------------------------- pyjama trousers: soft check, elastic waist, piped hems */
+  {
+    id: 'pajama',
+    name: '기본 파자마',
+    hidden: true, // not picked in the workshop: what the character changes into at home (day/world.js)
+    render(ctx) {
+      const K = mk(ctx);
+      const c = ctx.color;
+      const pipe = ctx.mat.cloth(whiteOn(c), { roughness: 0.85 });
+      const rib = ctx.mat.cloth(c, { map: ribTex(K, 90, 0.84), roughness: 0.9 });
+      const r = (y) => 0.192 + 0.014 * smooth(0.9, 0.35, y);
+      const yHem = 0.29;
+      const g = ctx.group(seatShell(K, pajamaCheck(K, c, 24, 8)));
+      g.add(K.sheet({ y0: 0.826, y1: 0.884, rows: 4, inflate: B_IN + 0.003, thick: 0.012, mat: rib }));
+      g.add(K.stick(K.bow(pipe, 0.026), 0.852, 0, B_IN + 0.02));
+      g.add(...pantLegs(K, { yHem, r, mat: pajamaCheck(K, c, 9, 8), uvY: true }));
+      g.add(...legCuffs(K, { ri: r(yHem) - 0.006, ro: r(yHem) + 0.012, y0: yHem - 0.006, y1: yHem + 0.05, rad: 0.01, mat: pipe }));
       return g;
     },
   },

@@ -8,9 +8,9 @@
  *   work      -6 per hour, twice as fast in overtime (a 9-hour day uses about half)
  *   home      +6 per hour awake, +12 per hour asleep
  * When it runs out the session closes by itself and the character goes home (settle).
- * After any clock-out the character stays home for at least REST_HOURS. It goes straight
- * to bed for those hours when it came home exhausted, or after overtime late at night or
- * in the morning.
+ * After any clock-out the character stays home for at least REST_HOURS. However it came
+ * home (late from overtime, or worn out), it rests at the table first; it goes to bed when
+ * the player says so (goSleep / wake), or by itself at bedtime (23:00-05:00).
  *
  * Nothing here touches the DOM or storage, so it runs in node too.
  */
@@ -18,6 +18,7 @@
 export const RATE = { perMin: 1, overtime: 1.5 };
 export const STAMINA = { max: 100, work: 6, overtime: 2, awake: 6, asleep: 12 };
 export const REST_HOURS = 6;
+export const SLEEP_HOURS = 10; // a sleep the player started ends by itself after this long
 export const DEFAULT_SETTINGS = { start: '09:00', end: '18:00', days: [1, 2, 3, 4, 5] };
 const MIN = 60e3;
 const HOUR = 3600e3;
@@ -128,21 +129,22 @@ export function exhaustAt(sess, settings) {
   return ot + ((sess.s0 - normalUse) / (W * STAMINA.overtime)) * HOUR;
 }
 
-/** is the character asleep at t while home ({ from, sleepUntil })? */
+/** is the character asleep at t while home? In bed because it was sent there ({ sleepFrom, sleepUntil }), or at bedtime */
 function asleepAt(h, t) {
-  return (h.sleepUntil > h.from && t >= h.from && t < h.sleepUntil) || homeSpotAt(t) === 'bed';
+  return (h.sleepUntil > t && t >= (h.sleepFrom || h.from)) || homeSpotAt(t) === 'bed';
 }
 
-/** stamina at atMs while home since h.from (h.s0 = stamina on arrival) */
+/** stamina at atMs while home (h.s0 = stamina at h.t0: on arrival, or when it last went to bed or got up) */
 export function homeStamina(h, atMs) {
   let s = h.s0;
-  let t = h.from;
+  let t = h.t0 || h.from;
   // walk hour by hour (bedtime changes on the hour); it is full again within a day
   for (let i = 0; i < 60 && t < atMs && s < STAMINA.max; i++) {
     const d = new Date(t);
     d.setMinutes(60, 0, 0);
     let next = Math.min(d.getTime(), atMs);
     if (h.sleepUntil > t && h.sleepUntil < next) next = h.sleepUntil;
+    if (h.sleepFrom > t && h.sleepFrom < next) next = h.sleepFrom;
     s += ((next - t) / HOUR) * (asleepAt(h, t) ? STAMINA.asleep : STAMINA.awake);
     t = next;
   }
@@ -163,12 +165,6 @@ export function restUntil(d) {
 
 export function canClockIn(d, nowMs) {
   return !d.session && nowMs >= restUntil(d);
-}
-
-/** late at night or in the morning: coming home from overtime then means going to bed */
-function lateHour(ms) {
-  const h = new Date(ms).getHours();
-  return h >= 22 || h < 12;
 }
 
 /* ------------------------------------------------------------------ data */
@@ -193,7 +189,14 @@ export function normalize(d) {
     session: d.session && Number.isFinite(d.session.in) ? { in: d.session.in, s0: clampS(num(d.session.s0, STAMINA.max)) } : null,
     home:
       h && Number.isFinite(h.from)
-        ? { from: h.from, s0: clampS(num(h.s0, STAMINA.max)), sleepUntil: num(h.sleepUntil, 0), sleep: h.sleep === 'tired' || h.sleep === 'late' ? h.sleep : null }
+        ? {
+            from: h.from,
+            s0: clampS(num(h.s0, STAMINA.max)),
+            t0: num(h.t0, h.from),
+            sleepFrom: num(h.sleepFrom, h.sleepUntil ? h.from : 0),
+            sleepUntil: num(h.sleepUntil, 0),
+            sleep: h.sleep === 'tired' || h.sleep === 'late' ? h.sleep : null,
+          }
         : null,
     log: Array.isArray(d.log) ? d.log.filter((r) => r && Number.isFinite(r.in) && Number.isFinite(r.out)).slice(-120) : [],
     bank: Number.isFinite(d.bank) ? Math.max(0, Math.floor(d.bank)) : 0,
@@ -203,6 +206,7 @@ export function normalize(d) {
 
 /** start a session with the stamina the character has now (no-op if one is running or it must still rest) */
 export function clockIn(d, nowMs) {
+  // (a sleeping character gets up and goes: the session starts with the stamina it has now)
   if (canClockIn(d, nowMs)) d.session = { in: nowMs, s0: staminaAt(d, nowMs) };
   return d;
 }
@@ -221,14 +225,51 @@ export function clockOut(d, outMs) {
   const left = workStamina(sess, out, d.settings);
   const tired = out >= ex - 1000;
   const overtimeMin = Math.round(t.overtimeMin);
-  const sleep = tired ? 'tired' : overtimeMin > 0 && lateHour(out) ? 'late' : null;
   const rec = { in: sess.in, out, acorns, minutes: Math.round(t.minutes), overtimeMin, tired, stamina: Math.round(left) };
   d.log.push(rec);
   if (d.log.length > 120) d.log.splice(0, d.log.length - 120);
   d.bank += acorns;
   d.session = null;
-  d.home = { from: out, s0: left, sleepUntil: sleep ? out + REST_HOURS * HOUR : 0, sleep };
-  d.receipt = { ...rec, bank: d.bank, sleep, restUntil: restUntil(d) };
+  // home, and awake: it rests first and goes to bed when told to (goSleep)
+  d.home = { from: out, s0: left, t0: out, sleepFrom: 0, sleepUntil: 0, sleep: null };
+  d.receipt = { ...rec, bank: d.bank, sleep: null, restUntil: restUntil(d) };
+  return d;
+}
+
+/** has the player put it to bed (and it has not got up yet)? */
+export function sentToBed(d, nowMs) {
+  const h = d.home;
+  return !!(h && h.sleepUntil > nowMs && nowMs >= (h.sleepFrom || h.from));
+}
+
+/** may it be sent to bed now? At home, awake, and not already in bed for the night */
+export function canSleep(d, nowMs) {
+  return !d.session && homeSpot(d, nowMs) !== 'bed';
+}
+
+/** to bed, for up to SLEEP_HOURS (stamina comes back twice as fast asleep) */
+export function goSleep(d, nowMs) {
+  if (!canSleep(d, nowMs)) return d;
+  // a character that has never been to work has no "home" yet: it has been in since long ago
+  const h = d.home || { from: nowMs - REST_HOURS * HOUR, s0: STAMINA.max, t0: nowMs, sleepFrom: 0, sleepUntil: 0, sleep: null };
+  h.s0 = homeStamina(h, nowMs);
+  h.t0 = nowMs;
+  h.sleepFrom = nowMs;
+  h.sleepUntil = nowMs + SLEEP_HOURS * HOUR;
+  h.sleep = null;
+  d.home = h;
+  return d;
+}
+
+/** up again (no-op unless the player put it to bed) */
+export function wake(d, nowMs) {
+  if (!sentToBed(d, nowMs)) return d;
+  const h = d.home;
+  h.s0 = homeStamina(h, nowMs);
+  h.t0 = nowMs;
+  h.sleepFrom = 0;
+  h.sleepUntil = 0;
+  h.sleep = null;
   return d;
 }
 
@@ -241,17 +282,17 @@ export function settle(d, nowMs) {
   return true;
 }
 
-/** where the character is at home: in bed while catching up on sleep, otherwise by the hour */
+/** where the character is at home: in bed while the player has it sleep, otherwise by the hour */
 export function homeSpot(d, nowMs) {
   const h = d.home;
-  if (h && h.sleepUntil && nowMs >= h.from && nowMs < h.sleepUntil) return 'bed';
+  if (h && h.sleepUntil && nowMs >= (h.sleepFrom || h.from) && nowMs < h.sleepUntil) return 'bed';
   return homeSpotAt(nowMs);
 }
 
 /** why it is in bed right now: 'tired' | 'late' (after overtime) | null (just bedtime) */
 export function sleepReason(d, nowMs) {
   const h = d.home;
-  return h && h.sleep && nowMs >= h.from && nowMs < h.sleepUntil ? h.sleep : null;
+  return h && h.sleep && nowMs >= (h.sleepFrom || h.from) && nowMs < h.sleepUntil ? h.sleep : null;
 }
 
 /** acorns banked today (local day of nowMs) including the running session */

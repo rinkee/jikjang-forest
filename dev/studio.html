@@ -52,6 +52,16 @@
   .hud .who { position: absolute; left: 4%; width: 40%; border-radius: 99px; background: rgba(255,250,240,0.9); }
   .hud .go { position: absolute; left: 4%; right: 4%; border-radius: 14px; background: rgba(91,179,106,0.92); }
   .hud .band { position: absolute; left: 0; right: 0; border-top: 1px dashed rgba(229,88,79,0.6); border-bottom: 1px dashed rgba(229,88,79,0.6); }
+  /* the subway cutscene's own overlay: the scrolling LED sign and the skip note */
+  .hud .led { position: absolute; left: 4%; right: 4%; overflow: hidden; display: flex; align-items: center; border-radius: 12px; background: #1d1a17; border: 3px solid #3d3630; box-shadow: 0 6px 18px rgba(0,0,0,0.25); }
+  .hud .led span { display: inline-block; padding-left: 100%; white-space: nowrap; color: #ffb43c; letter-spacing: 1px; text-shadow: 0 0 6px rgba(255,170,40,0.8); animation: led 6s linear infinite; }
+  @keyframes led { to { transform: translateX(-100%); } }
+  .hud .skip { position: absolute; left: 50%; transform: translateX(-50%); padding: 0 12px; display: flex; align-items: center; border-radius: 999px; background: rgba(43,29,20,0.55); color: #fffaf0; white-space: nowrap; }
+  .play { display: flex; gap: 8px; align-items: center; margin: 8px 0 4px; }
+  .play .btn { flex: 1; }
+  .chips { display: flex; flex-wrap: wrap; gap: 5px; margin: 4px 0 8px; }
+  .chip { border: 1px solid var(--line); border-radius: 999px; padding: 4px 9px; background: var(--panel); font-size: 13px; cursor: pointer; }
+  .chip:active { transform: translateY(1px); background: #f3e6cc; }
   .cap { font-size: 13px; color: var(--ink-2); }
 
   .views { display: grid; grid-template-rows: auto 1fr; gap: 12px; min-width: 0; min-height: 0; }
@@ -88,6 +98,7 @@
       <div class="world" id="world"></div>
       <div class="hud" id="hud">
         <div class="who"></div><div class="card"></div><div class="go"></div><div class="band"></div>
+        <div class="led" hidden><span id="ledText"></span></div><div class="skip" hidden>화면을 누르면 건너뛰어요</div>
       </div>
     </div>
     <div class="cap" id="phoneCap">폰 화면 (카메라로 본 모습)</div>

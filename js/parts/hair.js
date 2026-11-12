@@ -77,12 +77,23 @@ function radialGroove(v, pole, n, width, phase = 0) {
   return valley(Math.min(m, step - m), width);
 }
 
+/* ------------------------------------------------------------------ detail
+ * A character built small (Character({ detail }): the day scenes, the commuters) gets coarser
+ * hair too, though less so than its other parts: the hair is the outline of the head.
+ * The workshop's own (detail 1) is untouched.
+ */
+function fewer(ctx, n, min) {
+  const d = ctx.segs ? ctx.segs(1000, 1) / 1000 : 1;
+  if (d >= 1) return n;
+  return Math.max(min, Math.round(n * Math.min(1, Math.max(0.45, d * 1.5))));
+}
+
 /* ------------------------------------------------------------------ cap */
 function cap(ctx, mat, o) {
   const THREE = ctx.THREE;
-  const cols = o.cols || 168;
-  const lipRows = o.lipRows || 7;
-  const rows = o.rows || 40;
+  const cols = fewer(ctx, o.cols || 168, 48);
+  const lipRows = fewer(ctx, o.lipRows || 7, 3);
+  const rows = fewer(ctx, o.rows || 40, 12);
   const lipF = fn(o.lip ?? 7);
   const inset = o.inset ?? 0.03;
   const r0 = 1 - inset;
@@ -157,8 +168,9 @@ function lock(ctx, mat, points, o) {
   o = o || {};
   const THREE = ctx.THREE;
   const curve = new THREE.CatmullRomCurve3(points.map((q) => new THREE.Vector3(q[0], q[1], q[2])), false, o.curveType || 'centripetal');
-  const seg = o.seg || 36;
-  const rad = o.radial || 18;
+  const seg = fewer(ctx, o.seg || 36, 10);
+  // (strand grooves need a few facets each to read as grooves)
+  const rad = Math.min(o.radial || 18, Math.max(fewer(ctx, o.radial || 18, 8), o.strands ? 4 * (o.strands.n || 7) : 0));
   const pw = 2 / (o.pow || 2);
   const W = fn(o.w ?? 0.2);
   const H = fn(o.h ?? 0.12);
@@ -799,8 +811,9 @@ add('topbun', '똥머리', (ctx) => {
 /* 양쪽 똥머리 — two round buns up on the crown, centre part, soft fringe */
 add('twinbuns', '양쪽 똥머리', (ctx) => {
   const M = mats(ctx);
-  const dL = norm(dirv(-50, 50));
-  const dR = norm(dirv(50, 50));
+  // up on the crown and behind the ears (azimuth 0 is the face: 50 put them over the forehead)
+  const dL = norm(dirv(-118, 52));
+  const dR = norm(dirv(118, 52));
   const C = [-30, -10, 10, 30];
   const base = ear(sym([[0, 31], [40, 28], [52, 12], [64, 0], [72, -7], [104, -15], [130, -34], [180, -46]]));
   const edge = (az) => base(az) + scallop(C, 10.5, 6, 0.55)(az) * ss(44, 38, Math.abs(az)) + 3 * valley(az, 4);
@@ -989,7 +1002,146 @@ function crownRadius(obj, THREE) {
  *   - meshes tagged userData.hatDir (buns, the cowlick curl) hide when the hat reaches over the
  *     crown and has geometry right where they sit;
  *   - hatSwap() pairs (userData.hatMode 'full' / 'hat') switch to the squashed variant when the
- *     hat covers most of the crown (beanie, cap, bucket, beret, helmet, ...). */
+ *     hat covers most of the crown (beanie, cap, bucket, beret, helmet, ...);
+ *   - under such a hat the hair's main volume is pressed flat against the head (pressHair):
+ *     "hat hair", a thin layer that stays on the scalp, so the hat sits on the head at about
+ *     its own size instead of growing to clear the hair. */
+
+/* Directions from the head's centre, in cells of GRID degrees: what lies in each direction
+ * (the scalp, the hair, a hat) and how far out. Shared with the hats (CC.headGrid). */
+const GRID = 6;
+const GE = 180 / GRID;
+const GA = 360 / GRID;
+const cellOf = (x, y, z, r) =>
+  Math.min(GE - 1, Math.floor((Math.asin(clamp(y / r, -1, 1)) / D2R + 90) / GRID)) * GA + (Math.floor((Math.atan2(x, z) / D2R + 180) / GRID) % GA);
+/** visit every vertex of the visible meshes under roots, in the space of their parent (the head) */
+function eachHeadVertex(THREE, roots, fn, keep) {
+  const v = new THREE.Vector3();
+  const walk = (o, M) => {
+    if (o.visible === false) return;
+    if (o.matrixAutoUpdate) o.updateMatrix();
+    const MM = M.clone().multiply(o.matrix);
+    const p = o.isMesh && o.geometry && o.geometry.attributes.position;
+    if (p && (!keep || keep(o))) for (let i = 0; i < p.count; i++) fn(v.fromBufferAttribute(p, i).applyMatrix4(MM));
+    o.children.forEach((c) => walk(c, MM));
+  };
+  roots.forEach((r) => walk(r, new THREE.Matrix4()));
+}
+/**
+ * The nearest ('min') or furthest ('max') point of roots in every direction; 0 where there is
+ * nothing. Holes a cell or two wide between the vertices of a coarse mesh are filled in.
+ */
+function headGrid(THREE, roots, mode, keep) {
+  const g = new Float32Array(GE * GA);
+  const min = mode === 'min';
+  eachHeadVertex(
+    THREE,
+    roots,
+    (v) => {
+      const r = v.length();
+      if (r < 0.5) return;
+      const c = cellOf(v.x, v.y, v.z, r);
+      if (!g[c] || (min ? r < g[c] : r > g[c])) g[c] = r;
+    },
+    keep
+  );
+  const fill = (step, wrap, n) => {
+    const src = g.slice();
+    for (let c = 0; c < g.length; c++) {
+      if (src[c]) continue;
+      const at = (d) => {
+        if (step === 1) {
+          const row = Math.floor(c / GA);
+          const col = (((c % GA) + d) % GA + GA) % GA;
+          return src[row * GA + col];
+        }
+        const k = c + d * GA;
+        return k >= 0 && k < g.length ? src[k] : 0;
+      };
+      let lo = 0;
+      let hi = 0;
+      for (let d = 1; d <= n && !lo; d++) lo = at(-d);
+      for (let d = 1; d <= n && !hi; d++) hi = at(d);
+      if (lo && hi) g[c] = min ? Math.min(lo, hi) : Math.max(lo, hi);
+    }
+  };
+  fill(1, true, 2);
+  fill(GA, false, 2);
+  return g;
+}
+/** the scalp: how far the skin is in every direction (the skull is not a ball) */
+function scalpGrid(THREE, head) {
+  const skull = head.children.find((c) => c.name === 'skull');
+  const g = skull ? headGrid(THREE, [skull], 'max') : new Float32Array(GE * GA);
+  for (let c = 0; c < g.length; c++) if (!g[c]) g[c] = 1.04;
+  return g;
+}
+CC.headGrid = { GRID, GE, GA, cellOf, grid: headGrid, scalp: scalpGrid };
+
+const PRESS = { layer: 0.035, give: 0.1 };
+/**
+ * Hat hair. cover: 0..1 for every direction (1 under the hat, fading out just past its edge),
+ * or null to put the hair back. Under the hat the hair's main volume keeps a thin layer on
+ * the scalp (PRESS.layer) plus PRESS.give of whatever stood further out; it never goes below
+ * that layer, so no skin shows through.
+ */
+function pressHair(root, THREE, cover, scalp) {
+  const was = !!root.userData.pressed;
+  if (!was && !cover) return;
+  root.userData.pressed = !!cover;
+  let flagged = false;
+  root.traverse((m) => (flagged = flagged || !!(m.isMesh && m.userData.hairVolume)));
+  const v = new THREE.Vector3();
+  const inv = new THREE.Matrix4();
+  const walk = (o, M) => {
+    if (o.matrixAutoUpdate) o.updateMatrix();
+    const MM = M.clone().multiply(o.matrix);
+    const p = o.isMesh && o.geometry && o.geometry.attributes.position;
+    if (p && (!flagged || o.userData.hairVolume)) {
+      if (o.userData.loose) p.array.set(o.userData.loose); // always start from the style as built
+      if (cover) {
+        if (!o.userData.loose) o.userData.loose = p.array.slice();
+        inv.copy(MM).invert();
+        for (let i = 0; i < p.count; i++) {
+          v.fromBufferAttribute(p, i).applyMatrix4(MM);
+          const r = v.length();
+          if (r < 0.5) continue;
+          const c = cellOf(v.x, v.y, v.z, r);
+          const k = cover[c];
+          if (!k) continue;
+          const floor = scalp[c] + PRESS.layer;
+          if (r <= floor) continue;
+          const to = floor + (r - floor) * PRESS.give;
+          v.multiplyScalar((r + (to - r) * k) / r).applyMatrix4(inv);
+          p.setXYZ(i, v.x, v.y, v.z);
+        }
+      }
+      p.needsUpdate = true;
+      o.geometry.boundingSphere = null;
+      o.geometry.boundingBox = null;
+    }
+    o.children.forEach((c) => walk(c, MM));
+  };
+  walk(root, new THREE.Matrix4());
+}
+/** 1 in the directions the hats cover, fading to 0 two cells past their edge */
+function coverOf(THREE, hats) {
+  const g = headGrid(THREE, hats, 'min');
+  const w = new Float32Array(g.length);
+  for (let c = 0; c < g.length; c++) if (g[c]) w[c] = 1;
+  [0.6, 0.25].forEach((level) => {
+    const src = w.slice();
+    for (let c = 0; c < w.length; c++) {
+      if (src[c]) continue;
+      const row = Math.floor(c / GA);
+      const col = c % GA;
+      const near = [row * GA + ((col + 1) % GA), row * GA + ((col + GA - 1) % GA), c - GA, c + GA];
+      if (near.some((k) => k >= 0 && k < w.length && src[k])) w[c] = level;
+    }
+  });
+  return w;
+}
+
 function hideUnderHats(root, THREE) {
   const items = [];
   const modes = [];
@@ -997,7 +1149,6 @@ function hideUnderHats(root, THREE) {
     if (o.userData.hatDir) items.push(o);
     if (o.userData.hatMode) modes.push(o);
   });
-  if (!items.length && !modes.length) return;
   let lastKey = null;
   const v = new THREE.Vector3();
   root.updateMatrixWorld = function (force) {
@@ -1010,6 +1161,7 @@ function hideUnderHats(root, THREE) {
         let up = 0;
         const hits = items.map(() => 0);
         const crown = new Set(); // which crown cells (el >= 45, 8 x 3) the hat passes over
+        const band = new Set(); // which of the 8 directions it comes down in, to around the forehead (el 0..30)
         const walk = (o, M) => {
           if (o.visible === false) return;
           if (o.matrixAutoUpdate) o.updateMatrix();
@@ -1024,7 +1176,9 @@ function hideUnderHats(root, THREE) {
               v.divideScalar(r);
               if (v.y > 0.93) up++;
               const el = Math.asin(clamp(v.y, -1, 1)) / D2R;
-              if (el >= 45) crown.add(Math.min(2, Math.floor((el - 45) / 15)) * 8 + (Math.floor((Math.atan2(v.x, v.z) / D2R + 180) / 45) % 8));
+              const sector = Math.floor((Math.atan2(v.x, v.z) / D2R + 180) / 45) % 8;
+              if (el >= 45) crown.add(Math.min(2, Math.floor((el - 45) / 15)) * 8 + sector);
+              else if (el >= 0 && el < 30) band.add(sector);
               for (let k = 0; k < items.length; k++) {
                 const d = items[k].userData.hatDir;
                 if (v.x * d[0] + v.y * d[1] + v.z * d[2] > 0.95) hits[k]++;
@@ -1038,10 +1192,18 @@ function hideUnderHats(root, THREE) {
         } catch (e) {
           up = 0;
           crown.clear();
+          band.clear();
         }
         const covered = crown.size >= 15;
         items.forEach((it, k) => (it.visible = !(up >= 3 && hits[k] >= 3)));
         modes.forEach((m) => (m.visible = (m.userData.hatMode === 'hat') === covered));
+        // only a hat pulled down all round the head flattens the hair (not a party hat perched on top)
+        const pulledOn = covered && band.size >= 7;
+        try {
+          pressHair(this, THREE, pulledOn ? coverOf(THREE, hats) : null, pulledOn ? scalpGrid(THREE, head) : null);
+        } catch (e) {
+          /* leave the hair as it is */
+        }
       }
     }
     THREE.Object3D.prototype.updateMatrixWorld.call(this, force);

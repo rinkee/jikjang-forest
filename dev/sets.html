@@ -8,14 +8,14 @@
 /*
  * Dev page: one day scene with no UI.
  *   ?set=office|subway|home  ?mood=morning|day|dusk|night  ?seed=N  ?act=<activity id>
- *   ?spot=ready|table|bed (home)  ?dir=in|out (subway)  ?acorns=N  ?t=seconds to advance before READY
+ *   ?spot=ready|table|bed (home)  ?dir=in|out (subway)  ?seat=1|0 (subway)  ?acorns=N  ?t=seconds to advance before READY
  */
 import { CC } from '../js/cc.js';
 import { World } from '../js/day/world.js';
 import { buildOffice } from '../js/day/office.js';
 for (const f of ['hair', 'face', 'clothes', 'extras']) { try { await import(`../js/parts/${f}.js`); } catch (e) {} }
 const q = new URLSearchParams(location.search);
-const world = new World(document.getElementById('st'), { onStatus: (s) => (document.getElementById('lb').textContent = s) });
+const world = new World(document.getElementById('st'), { onStatus: (s) => (document.getElementById('lb').textContent = String(s || '').replace(/\s*:[a-z]+:/g, '')) });
 world.addSet('office', buildOffice(world));
 try { const m = await import('../js/day/subway.js'); world.addSet('subway', m.buildSubway(world)); } catch (e) { console.warn(e); }
 try { const m = await import('../js/day/home.js'); world.addSet('home', m.buildHome(world)); } catch (e) { console.warn(e); }
@@ -24,10 +24,11 @@ s.name = s.name || '김숲'; s.rank = s.rank || '사원'; s.dept = s.dept || '�
 await world.setLook(s);
 const mood = q.get('mood') || 'day';
 world.setMood(mood);
-const ctx = { now: () => Date.now(), todayAcorns: +(q.get('acorns') || 230), name: s.name, rank: s.rank, dept: s.dept, overtime: mood === 'night', lunch: q.get('act') === 'lunch', act: q.get('act') || null, spot: q.get('spot') || 'table', dir: q.get('dir') || 'in', ride: 0.4 };
+const ctx = { now: () => Date.now(), todayAcorns: +(q.get('acorns') || 230), name: s.name, rank: s.rank, dept: s.dept, overtime: mood === 'night', lunch: q.get('act') === 'lunch', act: q.get('act') || null, spot: q.get('spot') || 'table', dir: q.get('dir') || 'in', ride: 0.4, seat: q.has('seat') ? q.get('seat') === '1' : undefined };
 world.show(q.get('set') || 'office', ctx);
 const set = world.active;
 window.world = world;
+if (set.ready) { await set.ready; world.show(q.get('set') || 'office', ctx); } // the subway's passengers are made in the background
 const adv = +(q.get('t') || 2);
 // fast-forward so springs settle (headless frames are slow)
 for (let i = 0; i < adv * 30; i++) { set.update(1 / 30, world.t += 1 / 30, world.ctx, world); world.character.tick(1 / 30); }
