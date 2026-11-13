@@ -163,15 +163,6 @@ function voiced({ at = 0, dur = 0.2, f0 = 150, f1 = null, formants = [[700, 5, 1
   }
   node.connect(out);
 }
-/* the first three formants of five vowels (a man's; raised a little for higher voices) */
-const VOWELS = [
-  [730, 1090, 2440],
-  [270, 2290, 3010],
-  [300, 870, 2240],
-  [530, 1840, 2480],
-  [570, 840, 2410],
-];
-const vowel = (i, shift = 1) => VOWELS[i % VOWELS.length].map((f, k) => [f * shift, [7, 9, 9][k], [1, 0.55, 0.2][k]]);
 
 /* ============================================================== the office, as it sounds
  * Quiet things heard at a desk, all well under the other effects. office.tick(activity) is
@@ -332,8 +323,6 @@ const office = {
  * The same idea as the office, for the evening at home. home.tick(activity, { night }) is
  * called a few times a second while the room is on screen (null anywhere else):
  *   - the wall clock ticking, once a second, always (softer than anything else in the room);
- *   - the television murmuring to itself while it is on (not at bedtime), with a laugh from
- *     its audience now and then;
  *   - the character's own sounds: chopsticks and a bowl while it eats, taps on the phone,
  *     the cushion when it lies back, slippers while it paces (asleep it makes no sound);
  *   - and every so often one sound of a house, never the same twice running: the fridge
@@ -345,44 +334,6 @@ const INDOORS = {
   clock(at = 0, tock = false) {
     hiss({ at, dur: 0.012, vol: 0.05, freq: tock ? 2100 : 2700, q: 7 });
     tone({ type: 'sine', f0: tock ? 620 : 760, at, dur: 0.02, vol: 0.012 });
-  },
-  /**
-   * The television talking: one sentence in one voice — vowels with real formants, the pitch
-   * falling toward the end as speech does, a consonant's hiss between some syllables —
-   * through the set's little speaker. No words. Returns how long the sentence lasts.
-   */
-  tv(at = 0) {
-    const woman = R() < 0.5;
-    const base = woman ? 190 + R() * 50 : 105 + R() * 35;
-    const shift = woman ? 1.17 : 1;
-    const n = 5 + Math.floor(R() * 7);
-    let t = at;
-    for (let i = 0; i < n; i++) {
-      const dur = 0.09 + R() * 0.12 + (i === n - 1 ? 0.08 : 0);
-      const pitch = base * (1.12 - 0.22 * (i / n) + (R() - 0.5) * 0.12) * (i % 3 === 1 ? 1.08 : 1);
-      voiced({ at: t, dur, f0: pitch, f1: pitch * (i === n - 1 ? 0.82 : 0.95 + R() * 0.1), formants: vowel(Math.floor(R() * 5), shift), vol: 0.12, breath: 0.12, attack: 0.018, lp: 3000 });
-      t += dur;
-      if (R() < 0.45) {
-        hiss({ at: t, dur: 0.035, vol: 0.02, freq: 3200 + R() * 1500, q: 2 }); // s, t, k
-        t += 0.045;
-      }
-      t += R() < 0.15 ? 0.16 : 0.012; // a breath between phrases now and then
-    }
-    return t - at;
-  },
-  /** the television's audience laughing: a handful of people, each going ha-ha-ha in their own time */
-  laugh(at = 0) {
-    for (let who = 0; who < 7; who++) {
-      const woman = who % 2 === 0;
-      const base = woman ? 250 + R() * 90 : 130 + R() * 50;
-      const rate = 0.17 + R() * 0.05;
-      const start = at + R() * 0.3;
-      const n = 4 + Math.floor(R() * 4);
-      for (let i = 0; i < n; i++) {
-        const k = 1 - i / (n + 1);
-        voiced({ at: start + i * rate, dur: rate * 0.62, f0: base * (0.9 + 0.25 * k), f1: base * (0.8 + 0.2 * k), formants: vowel(0, woman ? 1.17 : 1), vol: 0.055 * k, breath: 0.5, attack: 0.012, lp: 3000 });
-      }
-    }
   },
   /** chopsticks on a bowl, and a bite */
   eat() {
@@ -471,7 +422,6 @@ const home = {
   SOUNDS: Object.keys(INDOORS),
   _clockAt: 0, // AudioContext time the clock is scheduled up to
   _ticks: 0,
-  _tvAt: 0, // ... the television next speaks
   _selfAt: 0, // ... the character next makes a sound of its own
   _nextAt: 0, // ... the next sound of the house is due
   _last: '',
@@ -485,7 +435,7 @@ const home = {
     const on = !!activity && ready() && !document.hidden;
     if (!on) {
       this._act = null;
-      this._nextAt = this._clockAt = this._tvAt = 0;
+      this._nextAt = this._clockAt = 0;
       return;
     }
     const now = ac.currentTime;
@@ -502,16 +452,6 @@ const home = {
       INDOORS.clock(this._clockAt - now, this._ticks++ % 2 === 1);
       this._clockAt += 1;
     }
-
-    // the television, while it is on
-    if (!asleep && !small) {
-      if (!this._tvAt) this._tvAt = now + 1 + R() * 2;
-      if (now >= this._tvAt) {
-        const len = INDOORS.tv();
-        if (R() < 0.22) INDOORS.laugh(len + 0.15);
-        this._tvAt = now + len + 1.2 + R() * 3.5;
-      }
-    } else this._tvAt = 0;
 
     // the character's own sounds
     if (activity !== this._act) {
